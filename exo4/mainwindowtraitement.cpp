@@ -45,6 +45,8 @@ MainWindowTraitement::MainWindowTraitement(QWidget *parent):QMainWindow(parent),
 
   // armement de SIGUSR1
   // TO DO
+  //comm4
+  //comm4
 
   // Demande d'envoi de SIGALRM dans 1 seconde
   alarm(1); 

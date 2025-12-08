@@ -49,7 +49,6 @@ MainWindowTraitement::MainWindowTraitement(QWidget *parent):QMainWindow(parent),
   // Demande d'envoi de SIGALRM dans 1 seconde
   alarm(1); 
 }
-//commentaire
 MainWindowTraitement::~MainWindowTraitement()
 {
   delete ui;

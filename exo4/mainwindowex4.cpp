@@ -3,8 +3,8 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <stdio.h>
-#include <signal.h>       // Pour sigaction, sigemptyset, SIGCHLD
-#include <sys/wait.h>    // Pour waitpid et macros WIFEXITED, WEXITSTATUS
+#include <signal.h>       
+#include <sys/wait.h>    
 #include <string.h>
 
 extern MainWindowEx4 *w;
@@ -204,7 +204,7 @@ void MainWindowEx4::on_pushButtonVider_clicked()
 void MainWindowEx4::on_pushButtonQuitter_clicked()
 {
 
-  
+
   close();
 }
 
@@ -213,7 +213,6 @@ void MainWindowEx4::on_pushButtonAnnuler1_clicked()
   if (idFils1 > 0)
   {
     kill(idFils1, SIGKILL);
-    printf("Processus fils 1 tué\n");
   }
 }
 
@@ -266,7 +265,6 @@ void HandlerSIGCHLD(int)
         if (WIFEXITED(status))
         {
             int code = WEXITSTATUS(status);
-            printf("Processus %d terminé avec code %d\n", pid, code);
 
             if ((pid == idFils1)&& (pid != 0))
                 w->setResultat1(code);

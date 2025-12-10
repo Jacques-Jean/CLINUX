@@ -211,45 +211,27 @@ void MainWindowEx4::on_pushButtonQuitter_clicked()
 void MainWindowEx4::on_pushButtonAnnuler1_clicked()
 {
   if (idFils1 > 0)
-  {
-    kill(idFils1, SIGKILL);
-  }
+    kill(idFils1, SIGUSR1);
 }
 
 void MainWindowEx4::on_pushButtonAnnuler2_clicked()
 {
   if (idFils2 > 0)
-  {
-    kill(idFils2, SIGKILL);
-  }
+    kill(idFils2, SIGUSR1);
 }
 
 void MainWindowEx4::on_pushButtonAnnuler3_clicked()
 {
   if (idFils3 > 0)
-  {
-    kill(idFils3, SIGKILL);
-  }
+    kill(idFils3, SIGUSR1);
 }
+
 
 void MainWindowEx4::on_pushButtonAnnulerTous_clicked()
 {
-  if (idFils1 > 0)
-  {
-    kill(idFils1, SIGKILL);
-  }
-  
-  if (idFils2 > 0)
-  {
-    kill(idFils2, SIGKILL);
-  }
-  
-  if (idFils3 > 0)
-  {
-    kill(idFils3, SIGKILL);
-  }
-
-
+  if (idFils1 > 0) kill(idFils1, SIGUSR1);
+  if (idFils2 > 0) kill(idFils2, SIGUSR1);
+  if (idFils3 > 0) kill(idFils3, SIGUSR1);
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////

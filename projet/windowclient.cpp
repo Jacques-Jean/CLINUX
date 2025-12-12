@@ -354,9 +354,9 @@ void WindowClient::dialogueErreur(const char* titre,const char* message)
 void WindowClient::closeEvent(QCloseEvent *event)
 {
     MESSAGE M;
-    M.type = 1;              // Toujours 1 pour serveur
-    M.expediteur = getpid(); // PID du client
-    M.requete = DECONNECT;   // Requête de déconnexion
+    M.type = 1;             
+    M.expediteur = getpid(); 
+    M.requete = DECONNECT;   
 
     if (msgsnd(idQ, &M, sizeof(M) - sizeof(long), 0) == -1)
     {
@@ -370,7 +370,22 @@ void WindowClient::closeEvent(QCloseEvent *event)
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void WindowClient::on_pushButtonLogin_clicked()
 {
-    // TO DO
+    
+  MESSAGE mconnect;
+  mconnect.type = 1; 
+  mconnect.expediteur = getpid();
+  strcpy(mconnect.data2,getNom());
+  strcpy(mconnect.texte,getMotDePasse());
+  strcpy(mconnect.data1, isNouveauChecked() == 0 ? "0" : "1");
+
+
+  mconnect.requete = LOGIN ;     
+    
+  if (msgsnd(idQ, &mconnect, sizeof(mconnect) - sizeof(long), 0) == -1)
+    {
+        perror("msgsnd identification");
+        exit(1);
+    }
 
 }
 

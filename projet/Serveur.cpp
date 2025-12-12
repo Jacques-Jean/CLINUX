@@ -14,7 +14,7 @@
 #include <mysql.h>
 #include <setjmp.h>
 #include "protocole.h" // contient la cle et la structure d'un message
-
+#include "FichierUtilisateur.h"
 int idQ,idShm,idSem;
 TAB_CONNEXIONS *tab;
 
@@ -132,8 +132,58 @@ int main()
                       break; 
 
       case LOGIN :  
+      {
                       fprintf(stderr,"(SERVEUR %d) Requete LOGIN reçue de %d : --%s--%s--%s--\n",getpid(),m.expediteur,m.data1,m.data2,m.texte);
+                       // Récupération nom et mot de passe
+                      char nom[20],motDePasse[20];
+                      strcpy(nom,m.data2);
+                      strcpy(motDePasse,m.texte);
+                      int nouvelUtilisateur = m.data1[0] - '0';
+                      bool flag = false ; 
+                      
+                      int pos = estPresent(nom);
+                      if (nouvelUtilisateur==1){
+                        printf("new user\n");
+                        if (pos<=0){
+                          ajouteUtilisateur(nom,motDePasse);
+                          
+                          flag = true ; 
+                        }
+                        if (pos>0){
+                          printf(" Utilisateur déjà existant !");
+                        }
+                        
+                      }
+                      if (nouvelUtilisateur==0){
+                        
+                        if (pos==0){
+                          
+                          printf("Utilisateur inconnu…");
+                        }
+                        if (pos>0){
+                          if (verifieMotDePasse(pos,motDePasse)==1){
+                            flag = true;
+                            }
+                          if (verifieMotDePasse(pos,motDePasse)==0){
+                            printf("Mot de passe incorrect…");
+                          }
+                        }
+                      }
+                        
+                      if (flag ){
+                        for (int i=0 ; i<6 ; i++)
+                      {
+                        if (tab->connexions[i].pidFenetre ==m.expediteur) {
+                          strcpy(tab->connexions[i].nom,nom);
+                          
+                          break;
+                        }
+                      }
+                      }
+
+
                       break; 
+      }
 
       case LOGOUT :  
                       fprintf(stderr,"(SERVEUR %d) Requete LOGOUT reçue de %d\n",getpid(),m.expediteur);

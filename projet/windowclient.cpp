@@ -18,7 +18,7 @@ int idQ, idShm;
 int timeOut = TIME_OUT;
 
 void handlerSIGUSR1(int sig);
-
+void handlerSIGINT (int sig);
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -46,6 +46,18 @@ WindowClient::WindowClient(QWidget *parent):QMainWindow(parent),ui(new Ui::Windo
     // Attachement à la mémoire partagée
 
     // Armement des signaux
+    struct sigaction A;
+    A.sa_handler = handlerSIGUSR1;
+    sigemptyset(&A.sa_mask);
+    A.sa_flags = 0;
+    sigaction(SIGUSR1, &A, NULL);
+
+    struct sigaction SA;
+    SA.sa_handler = handlerSIGINT;
+    sigemptyset(&SA.sa_mask);
+    SA.sa_flags = 0;
+    sigaction(SIGINT, &SA, NULL);
+
 
     // Envoi d'une requete de connexion au serveur
     MESSAGE M;
@@ -353,6 +365,18 @@ void WindowClient::dialogueErreur(const char* titre,const char* message)
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void WindowClient::closeEvent(QCloseEvent *event)
 {
+
+    MESSAGE mlogout ;
+    mlogout.type=1;
+    mlogout.expediteur= getpid();
+    mlogout.requete = LOGOUT ;
+
+    if (msgsnd(idQ, &mlogout, sizeof(mlogout) - sizeof(long), 0) == -1)
+    {
+        perror("msgsnd logout");
+        exit(1);
+    }
+
     MESSAGE M;
     M.type = 1;             
     M.expediteur = getpid(); 
@@ -383,7 +407,7 @@ void WindowClient::on_pushButtonLogin_clicked()
     
   if (msgsnd(idQ, &mconnect, sizeof(mconnect) - sizeof(long), 0) == -1)
     {
-        perror("msgsnd identification");
+        perror("msgsnd login");
         exit(1);
     }
 
@@ -392,6 +416,17 @@ void WindowClient::on_pushButtonLogin_clicked()
 void WindowClient::on_pushButtonLogout_clicked()
 {
     // TO DO
+    MESSAGE mlogout ;
+    mlogout.type=1;
+    mlogout.expediteur= getpid();
+    mlogout.requete = LOGOUT ;
+
+    if (msgsnd(idQ, &mlogout, sizeof(mlogout) - sizeof(long), 0) == -1)
+    {
+        perror("msgsnd logout");
+        exit(1);
+    }
+
     logoutOK();
 }
 
@@ -517,9 +552,14 @@ void WindowClient::on_checkBox5_clicked(bool checked)
 void handlerSIGUSR1(int sig)
 {
     MESSAGE m;
-    
+    fprintf(stderr,"coucou\n");
     // ...msgrcv(idQ,&m,...)
-    
+    if (msgrcv(idQ, &m, sizeof(MESSAGE)-sizeof(long), getpid(), 0)==0)
+    {
+      perror("(SERVEUR) Erreur de msgrcv");
+      msgctl(idQ,IPC_RMID,NULL);
+      exit(1);
+    }
       switch(m.requete)
       {
         case LOGIN :
@@ -550,3 +590,22 @@ void handlerSIGUSR1(int sig)
                   break;
       }
 }
+void handlerSIGINT(int sig)
+{
+    MESSAGE mlogout;
+    mlogout.type = 1;
+    mlogout.expediteur = getpid();
+    mlogout.requete = LOGOUT;
+
+    msgsnd(idQ, &mlogout, sizeof(mlogout) - sizeof(long), 0);
+
+    MESSAGE m;
+    m.type = 1;
+    m.expediteur = getpid();
+    m.requete = DECONNECT;
+
+    msgsnd(idQ, &m, sizeof(m) - sizeof(long), 0);
+
+    QApplication::exit();
+}
+

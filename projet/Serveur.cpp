@@ -49,6 +49,8 @@ int main()
   }
 
   // Armement des signaux
+  signal(SIGINT, handlerSIGINT);
+  signal(SIGTERM, handlerSIGINT);
 
   // Creation des ressources
   fprintf(stderr,"(SERVEUR %d) Creation de la file de messages\n",getpid());
@@ -131,62 +133,82 @@ int main()
 
                       break; 
 
-      case LOGIN :  
-      {
-                      fprintf(stderr,"(SERVEUR %d) Requete LOGIN reçue de %d : --%s--%s--%s--\n",getpid(),m.expediteur,m.data1,m.data2,m.texte);
-                       // Récupération nom et mot de passe
-                      char nom[20],motDePasse[20];
-                      strcpy(nom,m.data2);
-                      strcpy(motDePasse,m.texte);
+      case LOGIN:
+                { 
+                      fprintf(stderr,
+                        "(SERVEUR %d) Requete LOGIN reçue de %d : --%s--%s--%s--\n",
+                        getpid(), m.expediteur, m.data1, m.data2, m.texte);
+
+                      char nom[20], motDePasse[20];
+                      strcpy(nom, m.data2);
+                      strcpy(motDePasse, m.texte);
+
                       int nouvelUtilisateur = m.data1[0] - '0';
-                      bool flag = false ; 
-                      
+                      bool flag = false;
+
                       int pos = estPresent(nom);
-                      if (nouvelUtilisateur==1){
-                        printf("new user\n");
-                        if (pos<=0){
-                          ajouteUtilisateur(nom,motDePasse);
-                          
-                          flag = true ; 
-                        }
-                        if (pos>0){
-                          printf(" Utilisateur déjà existant !");
-                        }
-                        
-                      }
-                      if (nouvelUtilisateur==0){
-                        
-                        if (pos==0){
-                          
-                          printf("Utilisateur inconnu…");
-                        }
-                        if (pos>0){
-                          if (verifieMotDePasse(pos,motDePasse)==1){
-                            flag = true;
-                            }
-                          if (verifieMotDePasse(pos,motDePasse)==0){
-                            printf("Mot de passe incorrect…");
-                          }
-                        }
-                      }
-                        
-                      if (flag ){
-                        for (int i=0 ; i<6 ; i++)
+
+                      if (nouvelUtilisateur == 1)
                       {
-                        if (tab->connexions[i].pidFenetre ==m.expediteur) {
-                          strcpy(tab->connexions[i].nom,nom);
-                          
-                          break;
-                        }
+                          if (pos == 0)
+                          {
+                              ajouteUtilisateur(nom, motDePasse);
+                              strcpy(reponse.texte, "Nouvel utilisateur créé : bienvenue !");
+                              flag = true;
+                          }
+                          else
+                              strcpy(reponse.texte, "Utilisateur déjà existant !");
                       }
+                      else
+                      {
+                          if (pos == 0)
+                              strcpy(reponse.texte, "Utilisateur inconnu…");
+                          else if (verifieMotDePasse(pos, motDePasse))
+                          {
+                              strcpy(reponse.texte, "Login réussi !");
+                              flag = true;
+                          }
+                          else
+                              strcpy(reponse.texte, "Mot de passe incorrect…");
                       }
 
+                      if (flag)
+                      {
+                          for (int i = 0; i < 6; i++)
+                          {
+                              if (tab->connexions[i].pidFenetre == m.expediteur)
+                              {
+                                  strcpy(tab->connexions[i].nom, nom);
+                                  break;
+                              }
+                          }
+                          strcpy(reponse.data1, "OK");
+                      }
+                      else
+                          strcpy(reponse.data1, "KO");
 
-                      break; 
-      }
+                      reponse.type = m.expediteur;
+                      reponse.requete = LOGIN;
+
+                      msgsnd(idQ, &reponse, sizeof(reponse)-sizeof(long), 0);
+                      kill(m.expediteur, SIGUSR1);   
+                      break;
+                  }
+
 
       case LOGOUT :  
                       fprintf(stderr,"(SERVEUR %d) Requete LOGOUT reçue de %d\n",getpid(),m.expediteur);
+                      
+                      for (int i = 0; i < 6; i++)
+                          {
+                              if (tab->connexions[i].pidFenetre == m.expediteur)
+                              {
+                                  strcpy(tab->connexions[i].nom, "");
+                                  break;
+                              }
+                          }
+
+
                       break;
 
       case ACCEPT_USER :

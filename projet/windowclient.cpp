@@ -432,8 +432,20 @@ void WindowClient::on_pushButtonLogout_clicked()
 
 void WindowClient::on_pushButtonEnvoyer_clicked()
 {
-    // TO DO
+    if (strlen(getAEnvoyer()) == 0) 
+      return;
+
+    MESSAGE m;
+    m.type = 1;
+    m.expediteur = getpid();
+    m.requete = SEND;
+    strcpy(m.texte, getAEnvoyer());
+
+    msgsnd(idQ, &m, sizeof(m)-sizeof(long), 0);
+
+    setAEnvoyer(""); 
 }
+
 
 void WindowClient::on_pushButtonConsulter_clicked()
 {
@@ -481,12 +493,27 @@ void WindowClient::on_checkBox1_clicked(bool checked)
     if (checked)
     {
         ui->checkBox1->setText("Accepté");
-        // TO DO (etape 2)
+        MESSAGE mAccept;
+        mAccept.type = 1;
+        mAccept.expediteur = getpid();
+        mAccept.requete = ACCEPT_USER;
+        strcpy(mAccept.data1, getPersonneConnectee(1));
+
+        msgsnd(idQ, &mAccept, sizeof(mAccept)-sizeof(long), 0);
     }
     else
     {
         ui->checkBox1->setText("Refusé");
-        // TO DO (etape 2)
+        if (strlen(getPersonneConnectee(1)) > 0)
+        {
+            MESSAGE mrefu;
+            mrefu.type = 1;
+            mrefu.expediteur = getpid();
+            mrefu.requete = REFUSE_USER;
+            strcpy(mrefu.data1, getPersonneConnectee(1));
+
+            msgsnd(idQ, &mrefu, sizeof(mrefu)-sizeof(long), 0);
+        }
     }
 }
 
@@ -495,12 +522,27 @@ void WindowClient::on_checkBox2_clicked(bool checked)
     if (checked)
     {
         ui->checkBox2->setText("Accepté");
-        // TO DO (etape 2)
+        MESSAGE mAccept;
+        mAccept.type = 1;
+        mAccept.expediteur = getpid();
+        mAccept.requete = ACCEPT_USER;
+        strcpy(mAccept.data1, getPersonneConnectee(2));
+
+        msgsnd(idQ, &mAccept, sizeof(mAccept)-sizeof(long), 0);
     }
     else
     {
         ui->checkBox2->setText("Refusé");
-        // TO DO (etape 2)
+        if (strlen(getPersonneConnectee(2)) > 0)
+        {
+            MESSAGE mrefu;
+            mrefu.type = 1;
+            mrefu.expediteur = getpid();
+            mrefu.requete = REFUSE_USER;
+            strcpy(mrefu.data1, getPersonneConnectee(2));
+
+            msgsnd(idQ, &mrefu, sizeof(mrefu)-sizeof(long), 0);
+        }
     }
 }
 
@@ -509,12 +551,27 @@ void WindowClient::on_checkBox3_clicked(bool checked)
     if (checked)
     {
         ui->checkBox3->setText("Accepté");
-        // TO DO (etape 2)
+        MESSAGE mAccept;
+        mAccept.type = 1;
+        mAccept.expediteur = getpid();
+        mAccept.requete = ACCEPT_USER;
+        strcpy(mAccept.data1, getPersonneConnectee(3));
+
+        msgsnd(idQ, &mAccept, sizeof(mAccept)-sizeof(long), 0);
     }
     else
     {
         ui->checkBox3->setText("Refusé");
-        // TO DO (etape 2)
+        if (strlen(getPersonneConnectee(3)) > 0)
+        {
+            MESSAGE mrefu;
+            mrefu.type = 1;
+            mrefu.expediteur = getpid();
+            mrefu.requete = REFUSE_USER;
+            strcpy(mrefu.data1, getPersonneConnectee(3));
+
+            msgsnd(idQ, &mrefu, sizeof(mrefu)-sizeof(long), 0);
+        }
     }
 }
 
@@ -523,12 +580,27 @@ void WindowClient::on_checkBox4_clicked(bool checked)
     if (checked)
     {
         ui->checkBox4->setText("Accepté");
-        // TO DO (etape 2)
+        MESSAGE mAccept;
+        mAccept.type = 1;
+        mAccept.expediteur = getpid();
+        mAccept.requete = ACCEPT_USER;
+        strcpy(mAccept.data1, getPersonneConnectee(4));
+
+        msgsnd(idQ, &mAccept, sizeof(mAccept)-sizeof(long), 0);
     }
     else
     {
         ui->checkBox4->setText("Refusé");
-        // TO DO (etape 2)
+        if (strlen(getPersonneConnectee(4)) > 0)
+        {
+            MESSAGE mrefu;
+            mrefu.type = 1;
+            mrefu.expediteur = getpid();
+            mrefu.requete = REFUSE_USER;
+            strcpy(mrefu.data1, getPersonneConnectee(4));
+
+            msgsnd(idQ, &mrefu, sizeof(mrefu)-sizeof(long), 0);
+        }
     }
 }
 
@@ -537,12 +609,27 @@ void WindowClient::on_checkBox5_clicked(bool checked)
     if (checked)
     {
         ui->checkBox5->setText("Accepté");
-        // TO DO (etape 2)
+        MESSAGE mAccept;
+        mAccept.type = 1;
+        mAccept.expediteur = getpid();
+        mAccept.requete = ACCEPT_USER;
+        strcpy(mAccept.data1, getPersonneConnectee(5));
+
+        msgsnd(idQ, &mAccept, sizeof(mAccept)-sizeof(long), 0);
     }
     else
     {
         ui->checkBox5->setText("Refusé");
-        // TO DO (etape 2)
+        if (strlen(getPersonneConnectee(5)) > 0)
+        {
+            MESSAGE mrefu;
+            mrefu.type = 1;
+            mrefu.expediteur = getpid();
+            mrefu.requete = REFUSE_USER;
+            strcpy(mrefu.data1, getPersonneConnectee(5));
+
+            msgsnd(idQ, &mrefu, sizeof(mrefu)-sizeof(long), 0);
+        }
     }
 }
 
@@ -552,17 +639,13 @@ void WindowClient::on_checkBox5_clicked(bool checked)
 void handlerSIGUSR1(int sig)
 {
     MESSAGE m;
-    fprintf(stderr,"coucou\n");
     // ...msgrcv(idQ,&m,...)
-    if (msgrcv(idQ, &m, sizeof(MESSAGE)-sizeof(long), getpid(), 0)==0)
+    while (msgrcv(idQ, &m,sizeof(MESSAGE)-sizeof(long),getpid(),IPC_NOWAIT) != -1)
     {
-      perror("(SERVEUR) Erreur de msgrcv");
-      msgctl(idQ,IPC_RMID,NULL);
-      exit(1);
-    }
       switch(m.requete)
       {
         case LOGIN :
+                    {
                     if (strcmp(m.data1,"OK") == 0)
                     {
                       fprintf(stderr,"(CLIENT %d) Login OK\n",getpid());
@@ -572,26 +655,62 @@ void handlerSIGUSR1(int sig)
                     }
                     else w->dialogueErreur("Login...",m.texte);
                     break;
+                    }
+        case ADD_USER:
+                {
+                    bool dejaPresent = false;
 
-        case ADD_USER :
-                    
+                    for (int i = 1; i <= 5; i++)
+                    {
+                        if (strcmp(w->getPersonneConnectee(i), m.data1) == 0)
+                        {
+                            dejaPresent = true;
+                            break;
+                        }
+                    }
 
-
-
+                    if (!dejaPresent)
+                    {
+                        for (int i = 1; i <= 5; i++)
+                        {
+                            if (strlen(w->getPersonneConnectee(i)) == 0)
+                            {
+                                w->setPersonneConnectee(i, m.data1);
+                                break;
+                            }
+                        }
+                    }
                     break;
+                }
 
-        case REMOVE_USER :
-                    // TO DO
-                    break;
 
-        case SEND :
-                    // TO DO
-                    break;
+        case REMOVE_USER:
+                  {
+                      for (int i = 1; i <= 5; i++)
+                      {
+                          if (strcmp(w->getPersonneConnectee(i), m.data1) == 0)
+                          {
+                              w->setPersonneConnectee(i, "");
+                              break;
+                          }
+                      }
+                      break;
+                  }
+
+        case SEND:
+                  {
+                      // m.data1 = nom de l'expéditeur
+                      // m.texte = message
+                      w->ajouteMessage(m.data1, m.texte);
+                      break;
+                  }
+
 
         case CONSULT :
                   // TO DO
                   break;
       }
+    }
 }
 void handlerSIGINT(int sig)
 {

@@ -102,6 +102,8 @@ int main()
     switch(m.requete)
     {
       case CONNECT :  
+                     
+                    {
                       fprintf(stderr,"(SERVEUR %d) Requete CONNECT reçue de %d\n",getpid(),m.expediteur);
                       for (int i=0 ; i<6 ; i++)
                       {
@@ -115,8 +117,11 @@ int main()
                       }
 
                       break;
+                    }
 
       case DECONNECT :  
+                     
+                    {
                       fprintf(stderr,"(SERVEUR %d) Requete DECONNECT reçue de %d\n",getpid(),m.expediteur);
                       for (int i=0 ; i<6 ; i++)
                       {
@@ -132,145 +137,280 @@ int main()
 
 
                       break; 
-
+                    }
       case LOGIN:
-                { 
+                    {
+                        fprintf(stderr,
+                          "(SERVEUR %d) Requete LOGIN reçue de %d : --%s--%s--%s--\n",
+                          getpid(), m.expediteur, m.data1, m.data2, m.texte);
 
-                      fprintf(stderr,
-                        "(SERVEUR %d) Requete LOGIN reçue de %d : --%s--%s--%s--\n",
-                        getpid(), m.expediteur, m.data1, m.data2, m.texte);
+                        char nom[20], motDePasse[20];
+                        strcpy(nom, m.data2);
+                        strcpy(motDePasse, m.texte);
 
-                      char nom[20], motDePasse[20];
-                      strcpy(nom, m.data2);
-                      strcpy(motDePasse, m.texte);
+                        int nouvelUtilisateur = m.data1[0] - '0';
+                        bool ok = false;
 
-                      int nouvelUtilisateur = m.data1[0] - '0';
-                      bool flag = false;
+                        int pos = estPresent(nom);
 
-                      int pos = estPresent(nom);
-                      if (pos==-1){
-                        fprintf(stderr,"problème avec estPresent\n");
+                        if (nouvelUtilisateur == 1)
+                        {
+                            if (pos == 0)
+                            {
+                                ajouteUtilisateur(nom, motDePasse);
+                                strcpy(reponse.texte, "Nouvel utilisateur créé : bienvenue !");
+                                ok = true;
+                            }
+                            else
+                                strcpy(reponse.texte, "Utilisateur déjà existant !");
+                        }
+                        else
+                        {
+                            if (pos == 0)
+                                strcpy(reponse.texte, "Utilisateur inconnu…");
+                            else if (verifieMotDePasse(pos, motDePasse))
+                            {
+                                strcpy(reponse.texte, "Login réussi !");
+                                ok = true;
+                            }
+                            else
+                                strcpy(reponse.texte, "Mot de passe incorrect…");
+                        }
 
-                      }
-                      if (nouvelUtilisateur == 1)
-                      {
-                          if (pos == 0 || pos == -1)
-                          {
-                              
-                              ajouteUtilisateur(nom, motDePasse);
-                              strcpy(reponse.texte, "Nouvel utilisateur créé : bienvenue !");
-                              flag = true;
-                          }
+                        /* ===== Réponse LOGIN ===== */
+                        reponse.type = m.expediteur;
+                        reponse.requete = LOGIN;
 
-                          else
-                              strcpy(reponse.texte, "Utilisateur déjà existant !");
-                      }
-                      else
-                      {
-                          if (pos == 0 || pos == -1)
-                              strcpy(reponse.texte, "Utilisateur inconnu…");
-                          else if (verifieMotDePasse(pos, motDePasse))
-                          {
-                              strcpy(reponse.texte, "Login réussi !");
-                              flag = true;
-                          }
-                          else
-                              strcpy(reponse.texte, "Mot de passe incorrect…");
-                      }
+                        if (ok)
+                        {
+                            strcpy(reponse.data1, "OK");
 
-                      if (flag)
-                      {
-                          for (int i = 0; i < 6; i++)
-                          {
-                              if (tab->connexions[i].pidFenetre == m.expediteur)
-                              {
-                                  strcpy(tab->connexions[i].nom, nom);
-                                  break;
-                              }
-                          }
+                            /* mémorisation du nom */
+                            for (int i = 0; i < 6; i++)
+                            {
+                                if (tab->connexions[i].pidFenetre == m.expediteur)
+                                {
+                                    strcpy(tab->connexions[i].nom, nom);
+                                    break;
+                                }
+                            }
+                        }
+                        else
+                        strcpy(reponse.data1, "KO");
 
-                          for (int i = 0; i < 6; i++)
-                          {
-                              if (tab->connexions[i].pidFenetre != 0 &&
-                                  strcmp(tab->connexions[i].nom, "") != 0)
-                              {
-                                  MESSAGE add;
+                        msgsnd(idQ, &reponse, sizeof(reponse)-sizeof(long), 0);
+                        kill(m.expediteur, SIGUSR1);
 
-                                  
-                                  if (tab->connexions[i].pidFenetre != m.expediteur)
-                                  {
-                                      add.type = tab->connexions[i].pidFenetre;
-                                      add.expediteur = getpid();
-                                      add.requete = ADD_USER;
-                                      strcpy(add.data1, nom);
+                        if (!ok) break;
 
-                                      msgsnd(idQ, &add, sizeof(add)-sizeof(long), 0);
-                                      kill(tab->connexions[i].pidFenetre, SIGUSR1);
-                                  }
+                        for (int i = 0; i < 6; i++)
+                        {
+                            if (tab->connexions[i].pidFenetre != 0 &&
+                                tab->connexions[i].pidFenetre != m.expediteur &&
+                                strlen(tab->connexions[i].nom) > 0)
+                            {
+                                MESSAGE r;
+                                r.type = tab->connexions[i].pidFenetre;
+                                r.requete = ADD_USER;
+                                strcpy(r.data1, nom);
 
-                                  else
-                                  {
-                                      for (int j = 0; j < 6; j++)
-                                      {
-                                          if (tab->connexions[j].pidFenetre != 0 &&
-                                              strcmp(tab->connexions[j].nom, "") != 0 &&
-                                              tab->connexions[j].pidFenetre != m.expediteur)
-                                          {
-                                              add.type = m.expediteur;
-                                              add.expediteur = getpid();
-                                              add.requete = ADD_USER;
-                                              strcpy(add.data1, tab->connexions[j].nom);
+                                msgsnd(idQ, &r, sizeof(r)-sizeof(long), 0);
+                                kill(r.type, SIGUSR1);
+                            }
+                        }
 
-                                              msgsnd(idQ, &add, sizeof(add)-sizeof(long), 0);
-                                              kill(m.expediteur, SIGUSR1);
-                                          }
-                                      }
-                                  }
-                              }
-                          }
+                        
+                        for (int i = 0; i < 6; i++)
+                        {
+                            if (tab->connexions[i].pidFenetre != 0 &&
+                                tab->connexions[i].pidFenetre != m.expediteur &&
+                                strlen(tab->connexions[i].nom) > 0)
+                            {
+                                MESSAGE r;
+                                r.type = m.expediteur;
+                                r.requete = ADD_USER;
+                                strcpy(r.data1, tab->connexions[i].nom);
 
-                          strcpy(reponse.data1, "OK");
-                      }
+                                msgsnd(idQ, &r, sizeof(r)-sizeof(long), 0);
+                                kill(m.expediteur, SIGUSR1);
+                            }
+                        }
 
-                      
-                      else
-                          strcpy(reponse.data1, "KO");
-
-                      reponse.type = m.expediteur;
-                      reponse.requete = LOGIN;
-
-                      msgsnd(idQ, &reponse, sizeof(reponse)-sizeof(long), 0);
-                      kill(m.expediteur, SIGUSR1);   
-                      break;
-                  }
+                        break;
+                    }
 
 
-      case LOGOUT :  
-                      fprintf(stderr,"(SERVEUR %d) Requete LOGOUT reçue de %d\n",getpid(),m.expediteur);
-                      
-                      for (int i = 0; i < 6; i++)
-                          {
-                              if (tab->connexions[i].pidFenetre == m.expediteur)
-                              {
-                                  strcpy(tab->connexions[i].nom, "");
-                                  break;
-                              }
-                          }
+      case LOGOUT:
+                    {
+                        fprintf(stderr,
+                          "(SERVEUR %d) Requete LOGOUT reçue de %d\n",
+                          getpid(), m.expediteur);
+
+                        char tempnom[20] = "";
+                        pid_t pidLogout = m.expediteur;
+                        int idx = -1;
+
+                        
+                        for (int i = 0; i < 6; i++)
+                        {
+                            if (tab->connexions[i].pidFenetre == pidLogout)
+                            {
+                                strcpy(tempnom, tab->connexions[i].nom);
+                                idx = i;
+                                break;
+                            }
+                        }
+
+                        if (idx == -1) 
+                          break;
+
+                        
+                        strcpy(tab->connexions[idx].nom, "");
+                        for (int i = 0; i < 5; i++)
+                            tab->connexions[idx].autres[i] = 0;
+
+                        
+                        for (int i = 0; i < 6; i++)
+                        {
+                            for (int j = 0; j < 5; j++)
+                            {
+                                if (tab->connexions[i].autres[j] == pidLogout)
+                                    tab->connexions[i].autres[j] = 0;
+                            }
+                        }
+
+                        
+                        for (int i = 0; i < 6; i++)
+                        {
+                            if (tab->connexions[i].pidFenetre != 0)
+                            {
+                                MESSAGE r;
+                                r.type = tab->connexions[i].pidFenetre;
+                                r.requete = REMOVE_USER;
+                                strcpy(r.data1, tempnom);
+
+                                msgsnd(idQ, &r, sizeof(r)-sizeof(long), 0);
+                                kill(r.type, SIGUSR1);
+                            }
+                        }
+
+                        break;
+                    }
 
 
-                      break;
+      case ACCEPT_USER:
+                    {
+                        fprintf(stderr,
+                          "(SERVEUR %d) Requete ACCEPT_USER reçue de %d pour %s\n",
+                          getpid(), m.expediteur, m.data1);
 
-      case ACCEPT_USER :
-                      fprintf(stderr,"(SERVEUR %d) Requete ACCEPT_USER reçue de %d\n",getpid(),m.expediteur);
-                      break;
+                        int idxExp = -1;
+                        pid_t pidCible = 0;
+
+                        for (int i = 0; i < 6; i++)
+                            if (tab->connexions[i].pidFenetre == m.expediteur)
+                                idxExp = i;
+
+                        for (int i = 0; i < 6; i++)
+                            if (strcmp(tab->connexions[i].nom, m.data1) == 0)
+                                pidCible = tab->connexions[i].pidFenetre;
+
+                        if (idxExp == -1 || pidCible == 0)
+                            break;
+
+                        for (int i = 0; i < 5; i++)
+                        {
+                            if (tab->connexions[idxExp].autres[i] == pidCible)
+                                break; 
+                        }
+                        for (int i = 0; i < 5; i++)
+                        {
+
+                            if (tab->connexions[idxExp].autres[i] == 0)
+                            {
+                                tab->connexions[idxExp].autres[i] = pidCible;
+                                break;
+                            }
+                        }
+
+                        break;
+                    }
+
 
       case REFUSE_USER :
+                    {
                       fprintf(stderr,"(SERVEUR %d) Requete REFUSE_USER reçue de %d\n",getpid(),m.expediteur);
-                      break;
+                    
+                        int idxExp = -1;
+                        pid_t pidCible = 0;
 
-      case SEND :  
-                      fprintf(stderr,"(SERVEUR %d) Requete SEND reçue de %d\n",getpid(),m.expediteur);
-                      break; 
+                        for (int i = 0; i < 6; i++)
+                            if (tab->connexions[i].pidFenetre == m.expediteur)
+                                idxExp = i;
+
+                        for (int i = 0; i < 6; i++)
+                            if (strcmp(tab->connexions[i].nom, m.data1) == 0)
+                                pidCible = tab->connexions[i].pidFenetre;
+
+                        if (idxExp == -1 || pidCible == 0)
+                            break;
+
+                        for (int i = 0; i < 5; i++)
+                        {
+                            if (tab->connexions[idxExp].autres[i] == pidCible)
+                                break; 
+                        }
+                        for (int i = 0; i < 5; i++)
+                        {
+
+                            if (tab->connexions[idxExp].autres[i] == pidCible)
+                            {
+                                tab->connexions[idxExp].autres[i] = 0;
+                                break;
+                            }
+                        }
+
+                        break;
+                    }
+      case SEND:
+                      {
+                          fprintf(stderr,"(SERVEUR %d) Requete SEND reçue de %d : --%s--\n",getpid(), m.expediteur, m.texte);
+
+                          char nomExpediteur[20] = "";
+
+                          int idx = -1;
+                          for (int i = 0; i < 6; i++)
+                          {
+                              if (tab->connexions[i].pidFenetre == m.expediteur)
+                              {
+                                  strcpy(nomExpediteur, tab->connexions[i].nom);
+                                  idx = i;
+                                  break;
+                              }
+                          }
+
+                          if (idx == -1) 
+                            break;
+
+                          for (int i = 0; i < 5; i++)
+                          {
+                              int pidDest = tab->connexions[idx].autres[i];
+                              if (pidDest != 0)
+                              {
+                                  MESSAGE r;
+                                  r.type = pidDest;
+                                  r.requete = SEND;
+                                  strcpy(r.data1, nomExpediteur);
+                                  strcpy(r.texte, m.texte);
+
+                                  msgsnd(idQ, &r, sizeof(r)-sizeof(long), 0);
+                                  kill(pidDest, SIGUSR1);
+                              }
+                          }
+
+                          break;
+                      }
+ 
 
       case UPDATE_PUB :
                       fprintf(stderr,"(SERVEUR %d) Requete UPDATE_PUB reçue de %d\n",getpid(),m.expediteur);

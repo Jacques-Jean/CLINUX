@@ -568,13 +568,16 @@ void handlerSIGUSR1(int sig)
                       fprintf(stderr,"(CLIENT %d) Login OK\n",getpid());
                       w->loginOK();
                       w->dialogueMessage("Login...",m.texte);
-                      // ...
+                      
                     }
                     else w->dialogueErreur("Login...",m.texte);
                     break;
 
         case ADD_USER :
-                    // TO DO
+                    
+
+
+
                     break;
 
         case REMOVE_USER :

@@ -135,6 +135,7 @@ int main()
 
       case LOGIN:
                 { 
+
                       fprintf(stderr,
                         "(SERVEUR %d) Requete LOGIN reçue de %d : --%s--%s--%s--\n",
                         getpid(), m.expediteur, m.data1, m.data2, m.texte);
@@ -147,21 +148,26 @@ int main()
                       bool flag = false;
 
                       int pos = estPresent(nom);
+                      if (pos==-1){
+                        fprintf(stderr,"problème avec estPresent\n");
 
+                      }
                       if (nouvelUtilisateur == 1)
                       {
-                          if (pos == 0)
+                          if (pos == 0 || pos == -1)
                           {
+                              
                               ajouteUtilisateur(nom, motDePasse);
                               strcpy(reponse.texte, "Nouvel utilisateur créé : bienvenue !");
                               flag = true;
                           }
+
                           else
                               strcpy(reponse.texte, "Utilisateur déjà existant !");
                       }
                       else
                       {
-                          if (pos == 0)
+                          if (pos == 0 || pos == -1)
                               strcpy(reponse.texte, "Utilisateur inconnu…");
                           else if (verifieMotDePasse(pos, motDePasse))
                           {
@@ -182,8 +188,51 @@ int main()
                                   break;
                               }
                           }
+
+                          for (int i = 0; i < 6; i++)
+                          {
+                              if (tab->connexions[i].pidFenetre != 0 &&
+                                  strcmp(tab->connexions[i].nom, "") != 0)
+                              {
+                                  MESSAGE add;
+
+                                  
+                                  if (tab->connexions[i].pidFenetre != m.expediteur)
+                                  {
+                                      add.type = tab->connexions[i].pidFenetre;
+                                      add.expediteur = getpid();
+                                      add.requete = ADD_USER;
+                                      strcpy(add.data1, nom);
+
+                                      msgsnd(idQ, &add, sizeof(add)-sizeof(long), 0);
+                                      kill(tab->connexions[i].pidFenetre, SIGUSR1);
+                                  }
+
+                                  else
+                                  {
+                                      for (int j = 0; j < 6; j++)
+                                      {
+                                          if (tab->connexions[j].pidFenetre != 0 &&
+                                              strcmp(tab->connexions[j].nom, "") != 0 &&
+                                              tab->connexions[j].pidFenetre != m.expediteur)
+                                          {
+                                              add.type = m.expediteur;
+                                              add.expediteur = getpid();
+                                              add.requete = ADD_USER;
+                                              strcpy(add.data1, tab->connexions[j].nom);
+
+                                              msgsnd(idQ, &add, sizeof(add)-sizeof(long), 0);
+                                              kill(m.expediteur, SIGUSR1);
+                                          }
+                                      }
+                                  }
+                              }
+                          }
+
                           strcpy(reponse.data1, "OK");
                       }
+
+                      
                       else
                           strcpy(reponse.data1, "KO");
 

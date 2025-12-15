@@ -1,7 +1,8 @@
 #ifndef FICHIER_UTILISATEUR_H
 #define FICHIER_UTILISATEUR_H
 
-#define FICHIER_UTILISATEURS "./utilisateurs.dat"
+#define FICHIER_UTILISATEURS "/home/student/CLINUX/projet/utilisateurs.dat"
+
 
 // Pour le fichier des utilisateurs
 typedef struct

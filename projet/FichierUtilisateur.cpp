@@ -43,7 +43,7 @@ int hash(const char* motDePasse)
 void ajouteUtilisateur(const char* nom, const char* motDePasse)
 {
   
-  
+  fprintf(stderr,">>> ajouteUtilisateur APPELEE pour [%s]\n", nom);
   int fd = open(FICHIER_UTILISATEURS, O_WRONLY | O_APPEND | O_CREAT, 0664);
   if (fd == -1) {
     return;

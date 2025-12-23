@@ -6,6 +6,10 @@
 #include <sys/msg.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+
+
 
 #include <signal.h>
 
@@ -14,11 +18,15 @@ extern WindowClient *w;
 #include "protocole.h"
 
 int idQ, idShm;
-#define TIME_OUT 120
+#define TIME_OUT 20
 int timeOut = TIME_OUT;
 
 void handlerSIGUSR1(int sig);
+void handlerSIGUSR2(int sig);
+
 void handlerSIGINT (int sig);
+
+void handlerSIGALRM(int sig);
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -29,7 +37,7 @@ WindowClient::WindowClient(QWidget *parent):QMainWindow(parent),ui(new Ui::Windo
     logoutOK();
 
     // Recuperation de l'identifiant de la file de messages
-    fprintf(stderr,"(CLIENT %d) Recuperation de l'id de la file de messages\n",getpid());              getpid();
+    fprintf(stderr,"(CLIENT %d) Recuperation de l'id de la file de messages\n",getpid());              
 
     idQ = msgget(CLE, 0);
     if (idQ == -1)
@@ -37,6 +45,12 @@ WindowClient::WindowClient(QWidget *parent):QMainWindow(parent),ui(new Ui::Windo
         perror("msgget");
         exit(1);
     }
+
+    idShm = shmget(CLE, 0, 0);
+    if (idShm == -1) 
+      { 
+        perror("shmget client"); exit(1); 
+      }
 
     
 
@@ -52,12 +66,22 @@ WindowClient::WindowClient(QWidget *parent):QMainWindow(parent),ui(new Ui::Windo
     A.sa_flags = 0;
     sigaction(SIGUSR1, &A, NULL);
 
+
+    struct sigaction B;
+    B.sa_handler = handlerSIGUSR2;
+    sigemptyset(&B.sa_mask);
+    B.sa_flags = 0;
+    sigaction(SIGUSR2, &B, NULL);
+
     struct sigaction SA;
     SA.sa_handler = handlerSIGINT;
     sigemptyset(&SA.sa_mask);
     SA.sa_flags = 0;
     sigaction(SIGINT, &SA, NULL);
 
+    signal(SIGALRM, handlerSIGALRM);
+
+    signal(SIGUSR2, handlerSIGUSR2);
 
     // Envoi d'une requete de connexion au serveur
     MESSAGE M;
@@ -432,6 +456,9 @@ void WindowClient::on_pushButtonLogout_clicked()
 
 void WindowClient::on_pushButtonEnvoyer_clicked()
 {
+    w->resetTimeOut();
+
+
     if (strlen(getAEnvoyer()) == 0) 
       return;
 
@@ -449,12 +476,14 @@ void WindowClient::on_pushButtonEnvoyer_clicked()
 
 void WindowClient::on_pushButtonConsulter_clicked()
 {
+  w->resetTimeOut();
     // TO DO
 
 }
 
 void WindowClient::on_pushButtonModifier_clicked()
 {
+  w->resetTimeOut();
   // TO DO
   // Envoi d'une requete MODIF1 au serveur
   MESSAGE m;
@@ -490,6 +519,8 @@ void WindowClient::on_pushButtonModifier_clicked()
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void WindowClient::on_checkBox1_clicked(bool checked)
 {
+
+    w->resetTimeOut();
     if (checked)
     {
         ui->checkBox1->setText("Accepté");
@@ -519,6 +550,8 @@ void WindowClient::on_checkBox1_clicked(bool checked)
 
 void WindowClient::on_checkBox2_clicked(bool checked)
 {
+
+    w->resetTimeOut();
     if (checked)
     {
         ui->checkBox2->setText("Accepté");
@@ -548,6 +581,9 @@ void WindowClient::on_checkBox2_clicked(bool checked)
 
 void WindowClient::on_checkBox3_clicked(bool checked)
 {
+
+    w->resetTimeOut();
+
     if (checked)
     {
         ui->checkBox3->setText("Accepté");
@@ -577,6 +613,9 @@ void WindowClient::on_checkBox3_clicked(bool checked)
 
 void WindowClient::on_checkBox4_clicked(bool checked)
 {
+
+    w->resetTimeOut();
+
     if (checked)
     {
         ui->checkBox4->setText("Accepté");
@@ -606,6 +645,9 @@ void WindowClient::on_checkBox4_clicked(bool checked)
 
 void WindowClient::on_checkBox5_clicked(bool checked)
 {
+    w->resetTimeOut();
+
+
     if (checked)
     {
         ui->checkBox5->setText("Accepté");
@@ -651,6 +693,10 @@ void handlerSIGUSR1(int sig)
                       fprintf(stderr,"(CLIENT %d) Login OK\n",getpid());
                       w->loginOK();
                       w->dialogueMessage("Login...",m.texte);
+
+                      timeOut = TIME_OUT;
+                      w->setTimeOut(timeOut);
+                      alarm(1);
                       
                     }
                     else w->dialogueErreur("Login...",m.texte);
@@ -712,6 +758,21 @@ void handlerSIGUSR1(int sig)
       }
     }
 }
+void handlerSIGUSR2(int sig)
+{
+    (void)sig;
+
+    char* pubTexte = (char*)shmat(idShm, NULL, 0);
+    if (pubTexte == (char*)-1)
+        return;
+
+    w->setPublicite(pubTexte);
+
+    shmdt(pubTexte);  
+}
+
+
+
 void handlerSIGINT(int sig)
 {
     MESSAGE mlogout;
@@ -730,4 +791,36 @@ void handlerSIGINT(int sig)
 
     QApplication::exit();
 }
+
+void handlerSIGALRM(int sig)
+{
+    timeOut--;
+    w->setTimeOut(timeOut);
+
+    if (timeOut <= 0)
+    {
+        MESSAGE m;
+        m.type = 1;
+        m.expediteur = getpid();
+        m.requete = LOGOUT;
+
+        msgsnd(idQ, &m, sizeof(m)-sizeof(long), 0);
+
+        w->logoutOK();
+        alarm(0); 
+        return;
+    }
+
+    alarm(1);
+}
+
+
+void WindowClient::resetTimeOut()
+{
+    alarm(0);             
+    timeOut = TIME_OUT;
+    setTimeOut(timeOut);
+    alarm(1);
+}
+
 

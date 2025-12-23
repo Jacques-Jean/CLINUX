@@ -44,6 +44,10 @@ public:
     void dialogueMessage(const char *titre, const char *message);
     void dialogueErreur(const char *titre, const char *message);
 
+
+    void resetTimeOut();
+
+
 public slots:
     void on_pushButtonLogin_clicked();
     void on_pushButtonLogout_clicked();

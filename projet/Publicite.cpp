@@ -1,49 +1,75 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/types.h>
 #include <sys/ipc.h>
 #include <sys/msg.h>
 #include <sys/shm.h>
 #include <signal.h>
 #include <string.h>
-#include <sys/types.h>
-#include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <signal.h>
-#include "protocole.h" // contient la cle et la structure d'un message
+#include "protocole.h"
 
 int idQ, idShm;
+char* pShm;
 int fd;
+volatile sig_atomic_t stop = 0;
+
+void handlerSIGTERM(int sig)
+{
+    if (pShm != nullptr && pShm != (char*)-1)
+        shmdt(pShm);
+    fprintf(stderr, "(CLIENT) Mémoire détachée, fin du client\n");
+    exit(0);
+}
+
+
 
 int main()
 {
-  // Armement des signaux
+    signal(SIGTERM, handlerSIGTERM);
+    signal(SIGINT, SIG_IGN);
 
-  // Masquage de SIGINT
-  sigset_t mask;
-  sigaddset(&mask,SIGINT);
-  sigprocmask(SIG_SETMASK,&mask,NULL);
+    fprintf(stderr,"(PUBLICITE %d) Initialisation\n", getpid());
 
-  // Recuperation de l'identifiant de la file de messages
-  fprintf(stderr,"(PUBLICITE %d) Recuperation de l'id de la file de messages\n",getpid());
+    // 🔑 récupération file de messages
+    idQ = msgget(CLE, 0);
+    if (idQ == -1) { perror("msgget"); exit(1); }
 
-  // Recuperation de l'identifiant de la mémoire partagée
-  fprintf(stderr,"(PUBLICITE %d) Recuperation de l'id de la mémoire partagée\n",getpid());
+    // 🔑 récupération shm
+    idShm = shmget(CLE, 200, 0);
+    if (idShm == -1) { perror("shmget"); exit(1); }
 
-  // Attachement à la mémoire partagée
+    pShm = (char*)shmat(idShm, NULL, 0);
+    if (pShm == (char*)-1) { perror("shmat"); exit(1); }
 
-  // Ouverture du fichier de publicité
+    fd = open("./publicites.dat", O_RDONLY);
+    if (fd == -1) { perror("open"); exit(1); }
 
-  while(1)
-  {
-  	PUBLICITE pub;
-    // Lecture d'une publicité dans le fichier
+    while (!stop)
+    {
+        PUBLICITE pub;
+        if (read(fd, &pub, sizeof(pub)) != sizeof(pub))
+        {
+            lseek(fd, 0, SEEK_SET);
+            continue;
+        }
 
-    // Ecriture en mémoire partagée
+        strncpy(pShm, pub.texte, 199);
+        pShm[199] = 0;
 
-    // Envoi d'une requete UPDATE_PUB au serveur
+        MESSAGE m;
+        m.type = 1;
+        m.expediteur = getpid();
+        m.requete = UPDATE_PUB;
 
-  }
+        msgsnd(idQ, &m, sizeof(m)-sizeof(long), 0);
+        fprintf(stderr,"(PUBLICITE) UPDATE_PUB envoyé\n");
+
+        sleep(pub.nbSecondes);
+    }
+
+    shmdt(pShm);
+    close(fd);
+    fprintf(stderr,"(PUBLICITE) Arrêt propre\n");
+    return 0;
 }
-

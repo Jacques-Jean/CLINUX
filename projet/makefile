@@ -33,7 +33,7 @@ moc_dialogmodification.o : moc_dialogmodification.cpp
 moc_windowclient.o : moc_windowclient.cpp
 	g++ -c -pipe -g -std=gnu++11 -Wall -W -D_REENTRANT -fPIC -DQT_DEPRECATED_WARNINGS -DQT_QML_DEBUG -DQT_WIDGETS_LIB -DQT_GUI_LIB -DQT_CORE_LIB -I../UNIX_DOSSIER_FINAL -I. -isystem /usr/include/qt5 -isystem /usr/include/qt5/QtWidgets -isystem /usr/include/qt5/QtGui -isystem /usr/include/qt5/QtCore -I. -I. -I/usr/lib64/qt5/mkspecs/linux-g++ -o moc_windowclient.o moc_windowclient.cpp
 
-Serveur : Serveur.cpp FichierUtilisateur.o
+Serveur : Serveur.cpp FichierUtilisateur.o 
 	g++ Serveur.cpp FichierUtilisateur.o -o Serveur -I/usr/include/mysql -m64 -L/usr/lib64/mysql -lmysqlclient -lpthread -lz -lm -lrt -lssl -lcrypto -ldl
 
 CreationBD : CreationBD.cpp
@@ -48,8 +48,8 @@ Publicite : Publicite.cpp
 Consultation: Consultation.cpp
 	g++ Consultation.cpp -o Consultation -I/usr/include/mysql -m64 -L/usr/lib64/mysql -lmysqlclient -lpthread -lz -lm -lrt -lssl -lcrypto -ldl
 
-Modification : Modification.cpp
-	g++ Modification.cpp -o Modification -I/usr/include/mysql -m64 -L/usr/lib64/mysql -lmysqlclient -lpthread -lz -lm -lrt -lssl -lcrypto -ldl
+Modification : Modification.cpp FichierUtilisateur.cpp
+	g++ Modification.cpp FichierUtilisateur.o -o Modification -I/usr/include/mysql -m64 -L/usr/lib64/mysql -lmysqlclient -lpthread -lz -lm -lrt -lssl -lcrypto -ldl
 FichierUtilisateur.o: FichierUtilisateur.cpp FichierUtilisateur.h
 	g++ -c FichierUtilisateur.cpp
 

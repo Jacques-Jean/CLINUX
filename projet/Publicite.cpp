@@ -31,11 +31,9 @@ int main()
 
     fprintf(stderr,"(PUBLICITE %d) Initialisation\n", getpid());
 
-    // 🔑 récupération file de messages
     idQ = msgget(CLE, 0);
     if (idQ == -1) { perror("msgget"); exit(1); }
 
-    // 🔑 récupération shm
     idShm = shmget(CLE, 200, 0);
     if (idShm == -1) { perror("shmget"); exit(1); }
 

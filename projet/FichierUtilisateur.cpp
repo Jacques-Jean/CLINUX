@@ -104,3 +104,5 @@ int listeUtilisateurs(UTILISATEUR *vecteur) // le vecteur doit etre suffisamment
   close(fd);
   return userNumber;
 }
+
+

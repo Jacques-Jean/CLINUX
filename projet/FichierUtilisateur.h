@@ -4,12 +4,15 @@
 #define FICHIER_UTILISATEURS "/home/student/CLINUX/projet/utilisateurs.dat"
 
 
-// Pour le fichier des utilisateurs
 typedef struct
 {
   char  nom[20];
   int   hash;
+
 } UTILISATEUR;
+
+
+
 
 int estPresent(const char* nom);
 // retourne -1 en cas d'erreur
@@ -33,5 +36,6 @@ int listeUtilisateurs(UTILISATEUR *vecteur);
 // reçoit l'adresse d'un vecteur d'utilisateurs suffisament grand pour recevoir le contenu du fichier
 // retourne le nombre d'utilisateurs présents dans le fichier
 //          -1 si le fichier n'existe pas
+
 
 #endif

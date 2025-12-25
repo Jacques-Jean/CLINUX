@@ -18,7 +18,7 @@ extern WindowClient *w;
 #include "protocole.h"
 
 int idQ, idShm;
-#define TIME_OUT 20
+#define TIME_OUT 120
 int timeOut = TIME_OUT;
 
 void handlerSIGUSR1(int sig);
@@ -477,42 +477,79 @@ void WindowClient::on_pushButtonEnvoyer_clicked()
 void WindowClient::on_pushButtonConsulter_clicked()
 {
   w->resetTimeOut();
-    // TO DO
+  MESSAGE m;
+  m.type = 1;
+  m.expediteur = getpid();
+  m.requete = CONSULT;
+  strcpy(m.data1, getNomRenseignements());
+  msgsnd(idQ, &m, sizeof(m)-sizeof(long), 0);
+
 
 }
-
 void WindowClient::on_pushButtonModifier_clicked()
+
 {
-  w->resetTimeOut();
+
   // TO DO
+
   // Envoi d'une requete MODIF1 au serveur
+
   MESSAGE m;
+
   // ...
+
+
 
   // Attente d'une reponse en provenance de Modification
+
   fprintf(stderr,"(CLIENT %d) Attente reponse MODIF1\n",getpid());
+
   // ...
+
+
 
   // Verification si la modification est possible
+
   if (strcmp(m.data1,"KO") == 0 && strcmp(m.data2,"KO") == 0 && strcmp(m.texte,"KO") == 0)
+
   {
+
     QMessageBox::critical(w,"Problème...","Modification déjà en cours...");
+
     return;
+
   }
 
+
+
   // Modification des données par utilisateur
+
   DialogModification dialogue(this,getNom(),"",m.data2,m.texte);
+
   dialogue.exec();
+
   char motDePasse[40];
+
   char gsm[40];
+
   char email[40];
+
   strcpy(motDePasse,dialogue.getMotDePasse());
+
   strcpy(gsm,dialogue.getGsm());
+
   strcpy(email,dialogue.getEmail());
 
+
+
   // Envoi des données modifiées au serveur
+
   // ...
+
 }
+
+
+
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///// Fonctions clics sur les checkbox ///////////////////////////////////////////////////////////////////////
@@ -681,9 +718,15 @@ void WindowClient::on_checkBox5_clicked(bool checked)
 void handlerSIGUSR1(int sig)
 {
     MESSAGE m;
-    // ...msgrcv(idQ,&m,...)
-    while (msgrcv(idQ, &m,sizeof(MESSAGE)-sizeof(long),getpid(),IPC_NOWAIT) != -1)
-    {
+    while(msgrcv(idQ, &m, sizeof(MESSAGE)-sizeof(long), getpid(), IPC_NOWAIT) != -1) {
+       printf("==== MESSAGE RECU ====\n");
+        printf("Type (PID destinataire) : %ld\n", (long)m.type);
+        printf("Expediteur (PID)       : %d\n", m.expediteur);
+        printf("Requete                : %d\n", m.requete);
+        printf("Data1                  : %s\n", m.data1);
+        printf("Data2                  : %s\n", m.data2);
+        printf("Texte                  : %s\n", m.texte);
+        printf("=======================\n");
       switch(m.requete)
       {
         case LOGIN :
@@ -751,10 +794,17 @@ void handlerSIGUSR1(int sig)
                       break;
                   }
 
+        case CONSULT:
+                      fprintf(stderr,"testtes");
+                      if (strcmp(m.data1, "OK") == 0) {
+                          w->setGsm(m.data2);
+                          w->setEmail(m.texte);
+                      } else {
+                          w->setGsm("NON TROUVE");
+                          w->setEmail("NON TROUVE");
+                      }
+                      break;
 
-        case CONSULT :
-                  // TO DO
-                  break;
       }
     }
 }

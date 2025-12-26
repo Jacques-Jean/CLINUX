@@ -1,3 +1,4 @@
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,33 +21,41 @@ int main()
 
     fprintf(stderr, "(CONSULTATION %d) Démarrage\n", getpid());
 
-    // File de messages
     idQ = msgget(CLE, 0);
     if (idQ == -1)
     {
-        perror("msgget");
+        perror("Consultation msgget");
         exit(1);
     }
 
-    // Sémaphore
     idSem = semget(CLE, 1, 0);
     if (idSem == -1)
     {
-        perror("semget");
+        perror("Consultation semget");
         exit(1);
     }
-    semctl(idSem, 0, SETVAL, 1);
 
-    // Réception de la requête CONSULT
-    msgrcv(idQ, &req, sizeof(MESSAGE)-sizeof(long), 1, 0);
+    /* NE PAS réinitialiser le sémaphore ici ! (uniquement dans le serveur)
+       ==> suppression de semctl(idSem, 0, SETVAL, 1); */
+
+    /* Réception de la requête CONSULT envoyée par le serveur : type = PID Consultation */
+    if (msgrcv(idQ, &req, sizeof(MESSAGE)-sizeof(long), getpid(), 0) == -1)
+    {
+        perror("Consultation msgrcv");
+        exit(1);
+    }
 
     fprintf(stderr, "(CONSULTATION %d) Requête reçue pour [%s]\n",
             getpid(), req.data1);
 
-    // Prise du sémaphore
-    semop(idSem, &P, 1);
+    /* Prise BLOQUANTE du sémaphore */
+    if (semop(idSem, &P, 1) == -1)
+    {
+        perror("Consultation semop P");
+        exit(1);
+    }
 
-    // Connexion MySQL
+    /* Connexion MySQL */
     MYSQL *connexion = mysql_init(NULL);
     if (!mysql_real_connect(connexion,
                             "localhost",
@@ -55,30 +64,40 @@ int main()
                             "PourStudent",
                             0, 0, 0))
     {
-        fprintf(stderr, "Erreur MySQL\n");
+        fprintf(stderr, "(CONSULTATION %d) Erreur MySQL: %s\n",
+                getpid(), mysql_error(connexion));
+        /* Libérer le sémaphore avant de sortir */
+        semop(idSem, &V, 1);
         exit(1);
     }
 
-    // Requête SQL
+    /* Requête SQL : table UNIX_FINAL comme dans le serveur */
     char sql[256];
     sprintf(sql,
-        "SELECT gsm, email FROM utilisateurs WHERE nom='%s'",
+        "SELECT gsm, email FROM UNIX_FINAL WHERE nom='%s';",
         req.data1);
 
-    mysql_query(connexion, sql);
-    MYSQL_RES *res = mysql_store_result(connexion);
-    MYSQL_ROW row = mysql_fetch_row(res);
+    if (mysql_query(connexion, sql) == -1)
+    {
+        fprintf(stderr, "(CONSULTATION %d) Erreur MySQL query: %s\n",
+                getpid(), mysql_error(connexion));
+        mysql_close(connexion);
+        semop(idSem, &V, 1);
+        exit(1);
+    }
 
-    // Construction réponse
-    rep.type = req.expediteur;
-    rep.expediteur = getpid();
-    rep.requete = CONSULT;
+    MYSQL_RES *res = mysql_store_result(connexion);
+    MYSQL_ROW row  = mysql_fetch_row(res);
+
+    rep.type       = req.expediteur;   // type = PID client
+    rep.expediteur = getpid();         // expéditeur = Consultation
+    rep.requete    = CONSULT;
 
     if (row != NULL)
     {
         strcpy(rep.data1, "OK");
-        strcpy(rep.data2, row[0]);   // GSM
-        strcpy(rep.texte, row[1]);   // Email
+        strcpy(rep.data2, row[0] ? row[0] : "");
+        strcpy(rep.texte, row[1] ? row[1] : "");
     }
     else
     {
@@ -87,18 +106,19 @@ int main()
         rep.texte[0] = '\0';
     }
 
-    // Envoi réponse
-    msgsnd(idQ, &rep, sizeof(MESSAGE)-sizeof(long), 0);
-
-    // Signal au client
-    kill(req.expediteur, SIGUSR1);
-
-    // Nettoyage
     mysql_free_result(res);
     mysql_close(connexion);
 
-    // Libération sémaphore
-    semop(idSem, &V, 1);
+    /* Libération du sémaphore avant l’envoi (ou après, au choix, mais avant exit) */
+    if (semop(idSem, &V, 1) == -1)
+        perror("Consultation semop V");
+
+    /* Envoi réponse au client */
+    if (msgsnd(idQ, &rep, sizeof(MESSAGE)-sizeof(long), 0) == -1)
+        perror("Consultation msgsnd");
+
+    /* Signal au client */
+    kill(req.expediteur, SIGUSR1);
 
     fprintf(stderr, "(CONSULTATION %d) Fin\n", getpid());
     exit(0);

@@ -9,7 +9,7 @@
 #include <sys/ipc.h>
 #include <sys/shm.h>
 
-
+#include <QTimer>
 
 #include <signal.h>
 
@@ -486,70 +486,63 @@ void WindowClient::on_pushButtonConsulter_clicked()
 
 
 }
+
+
 void WindowClient::on_pushButtonModifier_clicked()
-
 {
+    w->resetTimeOut();
 
-  // TO DO
+    MESSAGE m;
+    m.type       = 1;
+    m.expediteur = getpid();
+    m.requete    = MODIF1;
+    /* nom courant = getNom() */
+    strcpy(m.data1, getNom());
+    m.data2[0] = 0;
+    m.texte[0] = 0;
 
-  // Envoi d'une requete MODIF1 au serveur
+    if (msgsnd(idQ, &m, sizeof(MESSAGE)-sizeof(long), 0) == -1)
+    {
+        perror("msgsnd MODIF1");
+        return;
+    }
 
-  MESSAGE m;
+    fprintf(stderr,"(CLIENT %d) Attente reponse MODIF1\n",getpid());
+    if (msgrcv(idQ, &m, sizeof(MESSAGE)-sizeof(long), getpid(), 0) == -1)
+    {
+        perror("msgrcv MODIF1");
+        return;
+    }
 
-  // ...
+    if (!strcmp(m.data1,"KO") &&
+        !strcmp(m.data2,"KO") &&
+        !strcmp(m.texte,"KO"))
+    {
+        QMessageBox::critical(w,"Problème...","Modification déjà en cours...");
+        return;
+    }
 
+    DialogModification dialogue(this,getNom(),"",m.data2,m.texte);
+    dialogue.exec();
 
+    char motDePasse[40];
+    char gsm[40];
+    char email[40];
 
-  // Attente d'une reponse en provenance de Modification
+    strcpy(motDePasse, dialogue.getMotDePasse());
+    strcpy(gsm,        dialogue.getGsm());
+    strcpy(email,      dialogue.getEmail());
 
-  fprintf(stderr,"(CLIENT %d) Attente reponse MODIF1\n",getpid());
+    MESSAGE m2;
+    m2.type       = 1;
+    m2.expediteur = getpid();
+    m2.requete    = MODIF2;
+    strcpy(m2.data1, motDePasse);  // mot de passe (vide = pas de changement)
+    strcpy(m2.data2, gsm);
+    strcpy(m2.texte, email);
 
-  // ...
-
-
-
-  // Verification si la modification est possible
-
-  if (strcmp(m.data1,"KO") == 0 && strcmp(m.data2,"KO") == 0 && strcmp(m.texte,"KO") == 0)
-
-  {
-
-    QMessageBox::critical(w,"Problème...","Modification déjà en cours...");
-
-    return;
-
-  }
-
-
-
-  // Modification des données par utilisateur
-
-  DialogModification dialogue(this,getNom(),"",m.data2,m.texte);
-
-  dialogue.exec();
-
-  char motDePasse[40];
-
-  char gsm[40];
-
-  char email[40];
-
-  strcpy(motDePasse,dialogue.getMotDePasse());
-
-  strcpy(gsm,dialogue.getGsm());
-
-  strcpy(email,dialogue.getEmail());
-
-
-
-  // Envoi des données modifiées au serveur
-
-  // ...
-
+    msgsnd(idQ, &m2, sizeof(MESSAGE)-sizeof(long), 0);
 }
-
-
-
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///// Fonctions clics sur les checkbox ///////////////////////////////////////////////////////////////////////
@@ -719,14 +712,14 @@ void handlerSIGUSR1(int sig)
 {
     MESSAGE m;
     while(msgrcv(idQ, &m, sizeof(MESSAGE)-sizeof(long), getpid(), IPC_NOWAIT) != -1) {
-       printf("==== MESSAGE RECU ====\n");
-        printf("Type (PID destinataire) : %ld\n", (long)m.type);
-        printf("Expediteur (PID)       : %d\n", m.expediteur);
-        printf("Requete                : %d\n", m.requete);
-        printf("Data1                  : %s\n", m.data1);
-        printf("Data2                  : %s\n", m.data2);
-        printf("Texte                  : %s\n", m.texte);
-        printf("=======================\n");
+       // printf("==== MESSAGE RECU ====\n");
+       //  printf("Type (PID destinataire) : %ld\n", (long)m.type);
+       //  printf("Expediteur (PID)       : %d\n", m.expediteur);
+       //  printf("Requete                : %d\n", m.requete);
+       //  printf("Data1                  : %s\n", m.data1);
+       //  printf("Data2                  : %s\n", m.data2);
+       //  printf("Texte                  : %s\n", m.texte);
+       //  printf("=======================\n");
       switch(m.requete)
       {
         case LOGIN :

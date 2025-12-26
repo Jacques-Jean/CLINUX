@@ -106,3 +106,28 @@ int listeUtilisateurs(UTILISATEUR *vecteur) // le vecteur doit etre suffisamment
 }
 
 
+
+////////////////////////////////////////////////////////////////////////////////////
+void updateMotDePasse(const char* nom, const char* motDePasse)
+{
+  int fd = open(FICHIER_UTILISATEURS, O_RDWR);
+  if (fd == -1)
+    return;
+
+  UTILISATEUR u;
+  int pos = 0;
+
+  while (read(fd, &u, sizeof(UTILISATEUR)) == sizeof(UTILISATEUR))
+  {
+    if (strcmp(u.nom, nom) == 0)
+    {
+      u.hash = hash(motDePasse);
+      lseek(fd, pos * sizeof(UTILISATEUR), SEEK_SET);
+      write(fd, &u, sizeof(UTILISATEUR));
+      break;
+    }
+    pos++;
+  }
+
+  close(fd);
+}

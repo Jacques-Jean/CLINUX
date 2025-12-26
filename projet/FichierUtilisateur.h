@@ -38,4 +38,8 @@ int listeUtilisateurs(UTILISATEUR *vecteur);
 //          -1 si le fichier n'existe pas
 
 
+void updateMotDePasse(const char* nom, const char* motDePasse);
+
+
+
 #endif

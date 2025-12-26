@@ -1,3 +1,4 @@
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
@@ -9,64 +10,109 @@
 #include <string.h>
 #include <unistd.h>
 #include "protocole.h"
+#include "FichierUtilisateur.h"
 
-int idQ,idSem;
+int idQ, idSem;
 
 int main()
 {
-  char nom[40];
+    MESSAGE m;
 
-  // Recuperation de l'identifiant de la file de messages
-  fprintf(stderr,"(MODIFICATION %d) Recuperation de l'id de la file de messages\n",getpid());
+    idQ  = msgget(CLE, 0);
+    idSem = semget(CLE, 1, 0);
 
-  // Recuperation de l'identifiant du sémaphore
+    /* Réception MODIF1 */
+    if (msgrcv(idQ, &m, sizeof(MESSAGE)-sizeof(long), getpid(), 0) == -1)
+    {
+        perror("Modification msgrcv MODIF1");
+        exit(1);
+    }
 
-  MESSAGE m;
-  // Lecture de la requête MODIF1
-  fprintf(stderr,"(MODIFICATION %d) Lecture requete MODIF1\n",getpid());
+    char nom[20];
+    strcpy(nom, m.data1);
+    int pidClient = m.expediteur;
 
-  // Tentative de prise non bloquante du semaphore 0 (au cas où un autre utilisateut est déjà en train de modifier)
+    /* Tentative de prise NON BLOQUANTE du sémaphore */
+    struct sembuf op;
+    op.sem_num = 0;
+    op.sem_op  = -1;
+    op.sem_flg = IPC_NOWAIT;
 
-  // Connexion à la base de donnée
-  MYSQL *connexion = mysql_init(NULL);
-  fprintf(stderr,"(MODIFICATION %d) Connexion à la BD\n",getpid());
-  if (mysql_real_connect(connexion,"localhost","Student","PassStudent1_","PourStudent",0,0,0) == NULL)
-  {
-    fprintf(stderr,"(MODIFICATION) Erreur de connexion à la base de données...\n");
-    exit(1);  
-  }
+    if (semop(idSem, &op, 1) == -1)
+    {
+        /* Sémaphore occupé : renvoi KO au client */
+        MESSAGE r;
+        r.type       = pidClient;
+        r.expediteur = getpid();
+        r.requete    = MODIF1;
+        strcpy(r.data1, "KO");
+        strcpy(r.data2, "KO");
+        strcpy(r.texte, "KO");
+        msgsnd(idQ, &r, sizeof(MESSAGE)-sizeof(long), 0);
+        kill(pidClient, SIGUSR1);
+        exit(0);
+    }
 
-  // Recherche des infos dans la base de données
-  fprintf(stderr,"(MODIFICATION %d) Consultation en BD pour --%s--\n",getpid(),m.data1);
-  strcpy(nom,m.data1);
-  MYSQL_RES  *resultat;
-  MYSQL_ROW  tuple;
-  char requete[200];
-  // sprintf(requete,...);
-  mysql_query(connexion,requete);
-  resultat = mysql_store_result(connexion);
-  tuple = mysql_fetch_row(resultat); // user existe forcement
+    /* Connexion MySQL + lecture GSM/EMAIL */
+    MYSQL *connexion = mysql_init(NULL);
+    mysql_real_connect(connexion,"localhost","Student","PassStudent1_",
+                       "PourStudent",0,0,0);
 
-  // Construction et envoi de la reponse
-  fprintf(stderr,"(MODIFICATION %d) Envoi de la reponse\n",getpid());
-  
-  // Attente de la requête MODIF2
-  fprintf(stderr,"(MODIFICATION %d) Attente requete MODIF2...\n",getpid());
+    char gsm[20]   = "---";
+    char email[50] = "---";
+    char requete[256];
 
-  // Mise à jour base de données
-  fprintf(stderr,"(MODIFICATION %d) Modification en base de données pour --%s--\n",getpid(),nom);
-  //sprintf(requete,...);
-  mysql_query(connexion,requete);
-  //sprintf(requete,...);
-  mysql_query(connexion,requete);
+    sprintf(requete,
+            "SELECT gsm,email FROM UNIX_FINAL WHERE nom='%s';",
+            nom);
 
-  // Mise à jour du fichier si nouveau mot de passe
+    mysql_query(connexion, requete);
+    MYSQL_RES *res = mysql_store_result(connexion);
+    MYSQL_ROW row = mysql_fetch_row(res);
 
-  // Deconnexion BD
-  mysql_close(connexion);
+    if (row)
+    {
+        if (row[0]) strcpy(gsm, row[0]);
+        if (row[1]) strcpy(email, row[1]);
+    }
+    mysql_free_result(res);
 
-  // Libération du semaphore 0
-  fprintf(stderr,"(MODIFICATION %d) Libération du sémaphore 0\n",getpid());
+    /* Envoi réponse MODIF1 au client */
+    MESSAGE r;
+    r.type       = pidClient;
+    r.expediteur = getpid();
+    r.requete    = MODIF1;
+    strcpy(r.data1, "OK");
+    strcpy(r.data2, gsm);
+    strcpy(r.texte, email);
+    msgsnd(idQ, &r, sizeof(MESSAGE)-sizeof(long), 0);
+    kill(pidClient, SIGUSR1);
 
-  exit(0);
+    /* Réception MODIF2 (mot de passe/gsm/email) */
+    if (msgrcv(idQ, &m, sizeof(MESSAGE)-sizeof(long), getpid(), 0) == -1)
+    {
+        perror("Modification msgrcv MODIF2");
+        /* libérer sémaphore avant de mourir */
+        op.sem_op = 1;
+        semop(idSem, &op, 1);
+        exit(1);
+    }
+
+    /* Mise à jour BD */
+    sprintf(requete,
+            "UPDATE UNIX_FINAL SET gsm='%s', email='%s' WHERE nom='%s';",
+            m.data2, m.texte, nom);
+    mysql_query(connexion, requete);
+
+    /* MAJ mot de passe si non vide */
+    if (strlen(m.data1) > 0)
+        updateMotDePasse(nom, m.data1);
+
+    mysql_close(connexion);
+
+    /* Libération sémaphore */
+    op.sem_op = 1;
+    semop(idSem, &op, 1);
+
+    exit(0);
 }

@@ -15,6 +15,7 @@
 #include <setjmp.h>
 #include "protocole.h" // contient la cle et la structure d'un message
 #include "FichierUtilisateur.h"
+#include <errno.h> 
 
 int idQ,idShm,idSem;
 TAB_CONNEXIONS *tab;
@@ -22,6 +23,7 @@ TAB_CONNEXIONS *tab;
 void afficheTab();
 
 MYSQL* connexion;
+
 void handlerSIGINT(int sig)
 {
     (void)sig;
@@ -41,22 +43,41 @@ void handlerSIGINT(int sig)
     }
 
     fprintf(stderr, "(SERVEUR) Suppression de la memoire partagee\n");
-    shmctl(idShm, IPC_RMID, NULL);
+    if (idShm != -1)
+        shmctl(idShm, IPC_RMID, NULL);
 
     fprintf(stderr, "(SERVEUR) Suppression de la file de messages\n");
-    msgctl(idQ, IPC_RMID, NULL);
+    if (idQ != -1)
+        msgctl(idQ, IPC_RMID, NULL);
 
-
-    fprintf(stderr, "\n(SERVEUR) Arret du serveur\n");
-
-    // Suppression du sémaphore
-    semctl(idSem, 0, IPC_RMID);
-
-    // Suppression de la file de messages (si elle existe)
-    msgctl(idQ, IPC_RMID, NULL);
+    fprintf(stderr, "(SERVEUR) Suppression du semaphore\n");
+    if (idSem != -1)
+        semctl(idSem, 0, IPC_RMID);
 
     fprintf(stderr, "(SERVEUR) Arret complet\n");
     exit(0);
+}
+void handlerSIGCHLD(int sig)
+{
+    (void)sig;
+    int status;
+    pid_t pid;
+
+    /* Récupérer tous les fils terminés sans bloquer */
+    while ((pid = waitpid(-1, &status, WNOHANG)) > 0)
+    {
+        fprintf(stderr,"(SERVEUR) Suppression du fils zombi %d\n", pid);
+
+        /* Nettoyer la table de connexions */
+        if (tab != NULL)
+        {
+            for (int i = 0; i < 6; i++)
+            {
+                if (tab->connexions[i].pidModification == pid)
+                    tab->connexions[i].pidModification = 0;
+            }
+        }
+    }
 }
 
 int main()
@@ -74,6 +95,13 @@ int main()
     signal(SIGINT, handlerSIGINT);
     signal(SIGTERM, handlerSIGINT);
 
+
+    // Armement SIGCHLD
+    struct sigaction A;
+    A.sa_handler = handlerSIGCHLD;
+    sigemptyset(&A.sa_mask);
+    A.sa_flags = SA_RESTART;
+    sigaction(SIGCHLD, &A, NULL);
 
     // Creation des ressources
     fprintf(stderr,"(SERVEUR %d) Creation de la file de messages\n",getpid());
@@ -155,15 +183,18 @@ int main()
     PUBLICITE pub;
 
     while(1)
-    {
-    	fprintf(stderr,"(SERVEUR %d) Attente d'une requete...\n",getpid());
-        if (msgrcv(idQ,&m,sizeof(MESSAGE)-sizeof(long),1,0) == -1)
         {
-            perror("(SERVEUR) Erreur de msgrcv");
-            msgctl(idQ,IPC_RMID,NULL);
-            exit(1);
-        }
+            fprintf(stderr,"(SERVEUR %d) Attente d'une requete...\n",getpid());
 
+            if (msgrcv(idQ, &m, sizeof(MESSAGE)-sizeof(long), 1, 0) == -1)
+            {
+                if (errno == EINTR)
+                    continue;          // interruption par un signal (SIGCHLD) -> on recommence l'attente
+
+                perror("(SERVEUR) Erreur de msgrcv");
+                msgctl(idQ, IPC_RMID, NULL);
+                exit(1);
+            }
         switch(m.requete)
         {
             case CONNECT :    
@@ -509,75 +540,104 @@ case LOGIN:
 
 case CONSULT:
 {
-    fprintf(stderr,"(SERVEUR %d) CONSULT demandé par PID %d pour nom=%s\n",
+    fprintf(stderr,"(SERVEUR %d) Requete CONSULT reçue de %d pour %s\n",
             getpid(), m.expediteur, m.data1);
 
-    // 1. Préparer les variables pour stocker les résultats
-    char gsm_trouve[20] = "---";
-    char email_trouve[50] = "---";
-
-    // 2. Requête SQL pour récupérer gsm et email
-    char requete[256];
-    sprintf(requete, "SELECT gsm,email FROM UNIX_FINAL WHERE nom='%s';", m.data1);
-
-    if (mysql_query(connexion, requete) == 0) {
-        MYSQL_RES *resultat = mysql_store_result(connexion);
-        MYSQL_ROW tuple;
-        if ((tuple = mysql_fetch_row(resultat)) != NULL) {
-            if (tuple[0] != NULL) strcpy(gsm_trouve, tuple[0]);
-            if (tuple[1] != NULL) strcpy(email_trouve, tuple[1]);
-        } else {
-            // utilisateur non trouvé
-            strcpy(gsm_trouve, "NON TROUVE");
-            strcpy(email_trouve, "NON TROUVE");
-        }
-        mysql_free_result(resultat);
-    } else {
-        fprintf(stderr,"(SERVEUR) Erreur MySQL CONSULT: %s\n", mysql_error(connexion));
-        strcpy(gsm_trouve, "ERREUR");
-        strcpy(email_trouve, "ERREUR");
+    /* Création d’un processus Consultation dédié */
+    pid_t pid = fork();
+    if (pid == -1)
+    {
+        perror("(SERVEUR) fork CONSULT");
+        break;
+    }
+    if (pid == 0)
+    {
+        execl("./Consultation", "Consultation", NULL);
+        perror("execl Consultation");
+        exit(1);
     }
 
-    // 3. Fork pour traiter la requête sans bloquer le serveur
-    pid_t pid_consult = fork();
-    if (pid_consult == 0) {
-        // Fils : envoie la réponse au client
-        MESSAGE m_resp;
-        m_resp.type = m.expediteur;      // destinataire = client
-        m_resp.expediteur = getpid();    // expéditeur = serveur
-        m_resp.requete = CONSULT;         // indique que c'est un CONSULT
-        strcpy(m_resp.data1, "OK");      // ou "KO"
-        strcpy(m_resp.data2, gsm_trouve);
-        strcpy(m_resp.texte, email_trouve);
+    /* Transfert de la requête au processus Consultation */
+    MESSAGE r = m;
+    r.type       = pid;            // destinataire = processus Consultation
+    r.expediteur = m.expediteur;   // PID du client
+    if (msgsnd(idQ, &r, sizeof(MESSAGE)-sizeof(long), 0) == -1)
+        perror("(SERVEUR) msgsnd CONSULT->Consultation");
+
+    break;
+}             
 
 
-        if (msgsnd(idQ, &m_resp, sizeof(m_resp)-sizeof(long), 0) == -1) {
-            perror("(SERVEUR) msgsnd CONSULT");
-        }
+case MODIF1:
+{
+    fprintf(stderr,"(SERVEUR %d) Requete MODIF1 reçue de %d\n",
+            getpid(), m.expediteur);
 
-        // prévenir le client
+    int idx = -1;
+    for (int i = 0; i < 6; i++)
+        if (tab->connexions[i].pidFenetre == m.expediteur)
+            idx = i;
+
+    if (idx == -1)
+        break;
+
+    // modification déjà en cours
+    if (tab->connexions[idx].pidModification != 0)
+    {
+        MESSAGE r;
+        r.type = m.expediteur;
+        r.requete = MODIF1;
+        strcpy(r.data1, "KO");
+        strcpy(r.data2, "KO");
+        strcpy(r.texte, "KO");
+        msgsnd(idQ, &r, sizeof(r)-sizeof(long), 0);
         kill(m.expediteur, SIGUSR1);
-        exit(0);
+        break;
     }
+
+    pid_t pid = fork();
+    if (pid == 0)
+    {
+        execl("./Modification", "Modification", NULL);
+        perror("execl Modification");
+        exit(1);
+    }
+
+    tab->connexions[idx].pidModification = pid;
+
+    MESSAGE r;
+    r.type       = pid;                     // type = PID du processus Modification
+    r.expediteur = m.expediteur;           // PID du client
+    r.requete    = MODIF1;
+    strcpy(r.data1, tab->connexions[idx].nom);
+    msgsnd(idQ, &r, sizeof(MESSAGE)-sizeof(long), 0);
 
     break;
 }
-                             
 
+          
+case MODIF2:
+{
+    fprintf(stderr,"(SERVEUR %d) Requete MODIF2 reçue de %d\n",
+            getpid(), m.expediteur);
 
-             case MODIF1: 
-                                            fprintf(stderr,"(SERVEUR %d) Requete MODIF1 reçue de %d\n", getpid(), m.expediteur);
+    int idx = -1;
+    for (int i = 0; i < 6; i++)
+        if (tab->connexions[i].pidFenetre == m.expediteur)
+            idx = i;
 
-                                            break;  // <--- très important
+    if (idx == -1)               break;
+    if (tab->connexions[idx].pidModification == 0) break;
 
-                                        
+    MESSAGE r = m;
+    r.type = tab->connexions[idx].pidModification;  // destinataire = Modification
+    msgsnd(idQ, &r, sizeof(MESSAGE)-sizeof(long), 0);
 
-            case MODIF2: {
-                                            fprintf(stderr,"(SERVEUR %d) Requete MODIF2 reçue de %d\n", getpid(), m.expediteur);
+    /* NE PAS remettre pidModification à 0 ici :
+       il sera remis à 0 dans handlerSIGCHLD quand le fils se termine */
 
-                                            
-                                            break;
-                                        }
+    break;
+}
 
 
             case LOGIN_ADMIN :

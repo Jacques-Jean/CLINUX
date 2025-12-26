@@ -21,6 +21,13 @@ int main()
     idQ  = msgget(CLE, 0);
     idSem = semget(CLE, 1, 0);
 
+    if (idQ == -1 || idSem == -1)
+    {
+        perror("Modification IPC");
+        exit(1);
+    }
+
+
     /* Réception MODIF1 */
     if (msgrcv(idQ, &m, sizeof(MESSAGE)-sizeof(long), getpid(), 0) == -1)
     {
@@ -48,6 +55,7 @@ int main()
         strcpy(r.data1, "KO");
         strcpy(r.data2, "KO");
         strcpy(r.texte, "KO");
+        
         msgsnd(idQ, &r, sizeof(MESSAGE)-sizeof(long), 0);
         kill(pidClient, SIGUSR1);
         exit(0);
@@ -111,8 +119,11 @@ int main()
     mysql_close(connexion);
 
     /* Libération sémaphore */
+ /* Libération du sémaphore juste avant de se terminer */
     op.sem_op = 1;
-    semop(idSem, &op, 1);
+    op.sem_flg = 0;
+    if (semop(idSem, &op, 1) == -1)
+        perror("Modification semop V");
 
     exit(0);
 }

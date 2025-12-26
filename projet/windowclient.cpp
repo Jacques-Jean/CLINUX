@@ -476,17 +476,19 @@ void WindowClient::on_pushButtonEnvoyer_clicked()
 
 void WindowClient::on_pushButtonConsulter_clicked()
 {
-  w->resetTimeOut();
-  MESSAGE m;
-  m.type = 1;
-  m.expediteur = getpid();
-  m.requete = CONSULT;
-  strcpy(m.data1, getNomRenseignements());
-  msgsnd(idQ, &m, sizeof(m)-sizeof(long), 0);
+    w->resetTimeOut();
 
+    /* Affichage “en attente...” dans les zones */
+    setGsm("...en attente...");
+    setEmail("...en attente...");
 
+    MESSAGE m;
+    m.type       = 1;
+    m.expediteur = getpid();
+    m.requete    = CONSULT;
+    strcpy(m.data1, getNomRenseignements());
+    msgsnd(idQ, &m, sizeof(m)-sizeof(long), 0);
 }
-
 
 void WindowClient::on_pushButtonModifier_clicked()
 {
@@ -788,7 +790,6 @@ void handlerSIGUSR1(int sig)
                   }
 
         case CONSULT:
-                      fprintf(stderr,"testtes");
                       if (strcmp(m.data1, "OK") == 0) {
                           w->setGsm(m.data2);
                           w->setEmail(m.texte);

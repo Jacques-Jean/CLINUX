@@ -4,8 +4,12 @@
 #include <unistd.h>
 #include <sys/ipc.h>
 #include <sys/msg.h>
+#include <sys/shm.h>
+#include <signal.h>
 
 extern int idQ;
+
+
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -14,6 +18,11 @@ WindowAdmin::WindowAdmin(QWidget *parent):QMainWindow(parent),ui(new Ui::WindowA
 {
     ui->setupUi(this);
     ::close(2);
+
+    /* ✅ INITIALISER la globale APRÈS construction */
+    wAdmin = this;
+
+
 }
 
 WindowAdmin::~WindowAdmin()
@@ -112,21 +121,42 @@ void WindowAdmin::dialogueErreur(const char* titre,const char* message)
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void WindowAdmin::on_pushButtonAjouterUtilisateur_clicked()
 {
-  // TO DO
+    MESSAGE m;
+    m.type = 1;
+    m.expediteur = getpid();
+    m.requete = NEW_USER;
+    strcpy(m.data1, getNom());
+    strcpy(m.data2, getMotDePasse());
+    msgsnd(idQ, &m, sizeof(m)-sizeof(long), 0);
 }
 
 void WindowAdmin::on_pushButtonSupprimerUtilisateur_clicked()
 {
-  // TO DO
+    MESSAGE m;
+    m.type = 1;
+    m.expediteur = getpid();
+    m.requete = DELETE_USER;
+    strcpy(m.data1, getNom());
+    msgsnd(idQ, &m, sizeof(m)-sizeof(long), 0);
 }
 
 void WindowAdmin::on_pushButtonAjouterPublicite_clicked()
 {
-  // TO DO
+    MESSAGE m;
+    m.type = 1;
+    m.expediteur = getpid();
+    m.requete = NEW_PUB;
+    sprintf(m.data1, "%d", getNbSecondes());
+    strcpy(m.texte, getTexte());
+    msgsnd(idQ, &m, sizeof(m)-sizeof(long), 0);
 }
 
 void WindowAdmin::on_pushButtonQuitter_clicked()
 {
-  // TO DO
-  exit(0);
+    MESSAGE m;
+    m.type = 1;
+    m.expediteur = getpid();
+    m.requete = LOGOUT_ADMIN;
+    msgsnd(idQ, &m, sizeof(m)-sizeof(long), 0);
+    exit(0);
 }

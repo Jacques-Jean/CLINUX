@@ -131,3 +131,34 @@ void updateMotDePasse(const char* nom, const char* motDePasse)
 
   close(fd);
 }
+
+
+
+void supprimeUtilisateur(const char* nom)
+{
+    FILE *fin = fopen(FICHIER_UTILISATEURS, "rb");
+    if (!fin) return; // fichier inexistant => rien à faire
+
+    FILE *fout = fopen("/home/student/CLINUX/projet/utilisateurs.tmp", "wb");
+    if (!fout)
+    {
+        fclose(fin);
+        return;
+    }
+
+    UTILISATEUR u;
+    while (fread(&u, sizeof(UTILISATEUR), 1, fin) == 1)
+    {
+        // On recopie tous les utilisateurs SAUF celui à supprimer
+        if (strcmp(u.nom, nom) != 0)
+        {
+            fwrite(&u, sizeof(UTILISATEUR), 1, fout);
+        }
+    }
+
+    fclose(fin);
+    fclose(fout);
+
+    remove(FICHIER_UTILISATEURS);
+    rename("/home/student/CLINUX/projet/utilisateurs.tmp", FICHIER_UTILISATEURS);
+}

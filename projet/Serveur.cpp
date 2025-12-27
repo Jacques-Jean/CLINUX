@@ -22,39 +22,62 @@ TAB_CONNEXIONS *tab;
 
 void afficheTab();
 
+
+struct sembuf semBD_P    = {0, -1, 0};  // bloquant
+struct sembuf semBD_V    = {0,  1, 0};
+struct sembuf semTab_P   = {1, -1, 0};  // bloquant
+struct sembuf semTab_V   = {1,  1, 0};
+union semun {
+    int val;
+    struct semid_ds *buf;
+    unsigned short *array;
+} arg;
+
+
 MYSQL* connexion;
 
 void handlerSIGINT(int sig)
 {
     (void)sig;
 
-    fprintf(stderr, "\n(SERVEUR) Arret du serveur...\n");
+    fprintf(stderr, "\n(SERVEUR %d) Arret du serveur...\n", getpid());
 
-    if (tab != NULL && tab->pidPublicite > 0)
+    /* Prendre sémaphore table pour nettoyer proprement */
+    semop(idSem, &semTab_P, 1);
+
+    /* Nettoyer pidPublicite si c'est moi qui l'ai créé */
+    if (tab->pidPublicite == getpid())
     {
         kill(tab->pidPublicite, SIGTERM);
         waitpid(tab->pidPublicite, NULL, 0);
+        tab->pidPublicite = 0;
     }
 
-    if (tab != NULL)
+    /* Nettoyer mon pidServeur */
+    if (tab->pidServeur1 == getpid())
+        tab->pidServeur1 = 0;
+    else if (tab->pidServeur2 == getpid())
+        tab->pidServeur2 = 0;
+
+    /* Nettoyer pidAdmin si mort */
+    if (tab->pidAdmin > 0 && kill(tab->pidAdmin, 0) == -1)
+        tab->pidAdmin = 0;
+
+    semop(idSem, &semTab_V, 1);
+
+    /* Détacher mémoire */
+    shmdt(tab);
+
+    /* SUPPRIMER IPC UNIQUEMENT si dernier serveur actif */
+    if (tab->pidServeur1 == 0 && tab->pidServeur2 == 0)
     {
-        shmdt(tab);
-        tab = NULL;
+        fprintf(stderr, "(SERVEUR) Dernier serveur actif → suppression IPC\n");
+        shmctl(idShm, IPC_RMID, NULL);
+        msgctl(idQ, IPC_RMID, NULL);
+        semctl(idSem, 0, IPC_RMID);  // supprime TOUS les sémaphores
     }
 
-    fprintf(stderr, "(SERVEUR) Suppression de la memoire partagee\n");
-    if (idShm != -1)
-        shmctl(idShm, IPC_RMID, NULL);
-
-    fprintf(stderr, "(SERVEUR) Suppression de la file de messages\n");
-    if (idQ != -1)
-        msgctl(idQ, IPC_RMID, NULL);
-
-    fprintf(stderr, "(SERVEUR) Suppression du semaphore\n");
-    if (idSem != -1)
-        semctl(idSem, 0, IPC_RMID);
-
-    fprintf(stderr, "(SERVEUR) Arret complet\n");
+    fprintf(stderr,"(SERVEUR %d) Arret complet\n", getpid());
     exit(0);
 }
 void handlerSIGCHLD(int sig)
@@ -63,20 +86,16 @@ void handlerSIGCHLD(int sig)
     int status;
     pid_t pid;
 
-    /* Récupérer tous les fils terminés sans bloquer */
     while ((pid = waitpid(-1, &status, WNOHANG)) > 0)
     {
         fprintf(stderr,"(SERVEUR) Suppression du fils zombi %d\n", pid);
 
-        /* Nettoyer la table de connexions */
-        if (tab != NULL)
-        {
-            for (int i = 0; i < 6; i++)
-            {
-                if (tab->connexions[i].pidModification == pid)
-                    tab->connexions[i].pidModification = 0;
-            }
-        }
+        /* Prendre sémaphore table pour nettoyer pidModification */
+        semop(idSem, &semTab_P, 1);
+        for (int i = 0; i < 6; i++)
+            if (tab->connexions[i].pidModification == pid)
+                tab->connexions[i].pidModification = 0;
+        semop(idSem, &semTab_V, 1);
     }
 }
 
@@ -103,75 +122,58 @@ int main()
     A.sa_flags = SA_RESTART;
     sigaction(SIGCHLD, &A, NULL);
 
-    // Creation des ressources
-    fprintf(stderr,"(SERVEUR %d) Creation de la file de messages\n",getpid());
-    idQ = msgget(CLE, IPC_CREAT | 0600);
-        if (idQ == -1)
-        {
-                perror("msgget");
-                exit(1);
-        }
+     /* ========================================== */
+    /* NOUVEAU : DOUBLE SERVEUR CORRECT          */
+    /* ========================================== */
+    pid_t monPid = getpid();
+    
+    /* Test si 1er serveur */
+    idShm = shmget(CLE, sizeof(TAB_CONNEXIONS), IPC_CREAT | IPC_EXCL | 0600);
+    bool premierServeur = (idShm != -1);
 
-    // Creation du sémaphore (1 semaphore)
-    fprintf(stderr,"(SERVEUR %d) Creation du semaphore\n", getpid());
-    idSem = semget(CLE, 1, IPC_CREAT | 0600);
-    if (idSem == -1)
+    if (premierServeur)
     {
-        perror("semget serveur");
-        exit(1);
+        fprintf(stderr,"(SERVEUR %d) PREMIER : création IPC\n", monPid);
+        idQ = msgget(CLE, IPC_CREAT | 0600);
+        idSem = semget(CLE, 2, IPC_CREAT | 0600);  // 2 SÉMAPHORES
+        
+        arg.val = 1; semctl(idSem, 0, SETVAL, arg);  // BD
+        arg.val = 1; semctl(idSem, 1, SETVAL, arg);  // Table   
+    }
+    else
+    {
+        fprintf(stderr,"(SERVEUR %d) SECOND : connexion IPC\n", monPid);
+        idShm = shmget(CLE, sizeof(TAB_CONNEXIONS), 0);
+        idQ = msgget(CLE, 0);
+        idSem = semget(CLE, 2, 0);
     }
 
-    // Initialisation du semaphore à 1
-    union semun
+    tab = (TAB_CONNEXIONS*)shmat(idShm, NULL, 0);
+    
+    /* Protéger init table */
+    semop(idSem, &semTab_P, 1);
+    
+    if (premierServeur)
     {
-        int val;
-        struct semid_ds *buf;
-        unsigned short *array;
-    } arg;
-
-    arg.val = 1;
-    semctl(idSem, 0, SETVAL, arg);
-
-
-    idShm = shmget(CLE, sizeof(TAB_CONNEXIONS), IPC_CREAT | 0600);
-    if ( idShm==-1){
-        perror("shmget");
-        exit(1);
-    }
-
-
-
-    // Initialisation du tableau de connexions
-    fprintf(stderr,"(SERVEUR %d) Initialisation de la table des connexions\n",getpid());
-    tab = (TAB_CONNEXIONS*) shmat(idShm, NULL, 0);
-
-
-    for (int i=0 ; i<6 ; i++)
-    {
-        tab->connexions[i].pidFenetre = 0;
-        strcpy(tab->connexions[i].nom,"");
-        for (int j=0 ; j<5 ; j++) tab->connexions[i].autres[j] = 0;
-        tab->connexions[i].pidModification = 0;
-    }
-    tab->pidServeur1 = getpid();
-    tab->pidServeur2 = 0;
-    tab->pidAdmin = 0;
-    tab->pidPublicite = 0;
-
-    afficheTab();
-
-    // Creation du processus Publicite
-
-
-    pid_t pidPub = fork();
-    if (pidPub == 0) {
-        execl("./Publicite", "Publicite", NULL);
-        perror("execl publicite");
-        exit(1);
-    } else {
+        memset(tab, 0, sizeof(TAB_CONNEXIONS));
+        tab->pidServeur1 = monPid;
+        pid_t pidPub = fork();
+        if (pidPub == 0) { execl("./Publicite", "Publicite", NULL); exit(1); }
         tab->pidPublicite = pidPub;
     }
-
+    else
+    {
+        /* Vérifier place */
+        bool placeOK = false;
+        if (tab->pidServeur1 == 0 || kill(tab->pidServeur1, 0) == -1)
+            { tab->pidServeur1 = monPid; placeOK = true; }
+        else if (tab->pidServeur2 == 0 || kill(tab->pidServeur2, 0) == -1)
+            { tab->pidServeur2 = monPid; placeOK = true; }
+        if (!placeOK) { semop(idSem, &semTab_V, 1); shmdt(tab); exit(1); }
+    }
+    
+    semop(idSem, &semTab_V, 1);
+    afficheTab();
 
 
     int i,k,j;
@@ -181,6 +183,8 @@ int main()
     MYSQL_RES    *resultat;
     MYSQL_ROW    tuple;
     PUBLICITE pub;
+
+
 
     while(1)
         {
@@ -234,127 +238,127 @@ int main()
 
                                             break; 
                                         }
-case LOGIN:
-{
-    fprintf(stderr,
-        "(SERVEUR %d) Requete LOGIN reçue de %d : --%s--%s--%s--\n",
-        getpid(), m.expediteur, m.data1, m.data2, m.texte);
-
-    char nom[20], motDePasse[20];
-    strcpy(nom, m.data2);
-    strcpy(motDePasse, m.texte);
-
-    int nouvelUtilisateur = m.data1[0] - '0';
-    bool ok = false;
-
-    int pos = estPresent(nom);
-
-    // ===== NOUVEL UTILISATEUR =====
-    if (nouvelUtilisateur == 1)
-    {
-        if (pos == 0 || pos == -1)   // utilisateur absent
-        {
-            ajouteUtilisateur(nom, motDePasse);
-
-            char requete[256];
-            sprintf(requete,
-                "INSERT INTO UNIX_FINAL (nom, gsm, email) VALUES ('%s', '---', '---');",
-                nom);
-            mysql_query(connexion, requete);
-
-            strcpy(reponse.texte, "Nouvel utilisateur créé : bienvenue !");
-            ok = true;
-        }
-        else
-        {
-            strcpy(reponse.texte, "Utilisateur déjà existant !");
-        }
-    }
-
-    // ===== UTILISATEUR EXISTANT =====
-    else
-    {
-        if (pos == -1)
-        {
-            strcpy(reponse.texte, "Aucun utilisateur enregistré.");
-        }
-        else if (pos == 0)
-        {
-            strcpy(reponse.texte, "Utilisateur inconnu…");
-        }
-        else if (verifieMotDePasse(pos, motDePasse))
-        {
-            strcpy(reponse.texte, "Login réussi !");
-            ok = true;
-        }
-        else
-        {
-            strcpy(reponse.texte, "Mot de passe incorrect…");
-        }
-    }
-
-    reponse.type = m.expediteur;
-    reponse.requete = LOGIN;
-
-    if (ok)
-    {
-        strcpy(reponse.data1, "OK");
-
-        for (int i = 0; i < 6; i++)
-        {
-            if (tab->connexions[i].pidFenetre == m.expediteur)
+            case LOGIN:
             {
-                strcpy(tab->connexions[i].nom, nom);
+                fprintf(stderr,
+                    "(SERVEUR %d) Requete LOGIN reçue de %d : --%s--%s--%s--\n",
+                    getpid(), m.expediteur, m.data1, m.data2, m.texte);
+
+                char nom[20], motDePasse[20];
+                strcpy(nom, m.data2);
+                strcpy(motDePasse, m.texte);
+
+                int nouvelUtilisateur = m.data1[0] - '0';
+                bool ok = false;
+
+                int pos = estPresent(nom);
+
+                // ===== NOUVEL UTILISATEUR =====
+                if (nouvelUtilisateur == 1)
+                {
+                    if (pos == 0 || pos == -1)   // utilisateur absent
+                    {
+                        ajouteUtilisateur(nom, motDePasse);
+
+                        char requete[256];
+                        sprintf(requete,
+                            "INSERT INTO UNIX_FINAL (nom, gsm, email) VALUES ('%s', '---', '---');",
+                            nom);
+                        mysql_query(connexion, requete);
+
+                        strcpy(reponse.texte, "Nouvel utilisateur créé : bienvenue !");
+                        ok = true;
+                    }
+                    else
+                    {
+                        strcpy(reponse.texte, "Utilisateur déjà existant !");
+                    }
+                }
+
+                // ===== UTILISATEUR EXISTANT =====
+                else
+                {
+                    if (pos == -1)
+                    {
+                        strcpy(reponse.texte, "Aucun utilisateur enregistré.");
+                    }
+                    else if (pos == 0)
+                    {
+                        strcpy(reponse.texte, "Utilisateur inconnu…");
+                    }
+                    else if (verifieMotDePasse(pos, motDePasse))
+                    {
+                        strcpy(reponse.texte, "Login réussi !");
+                        ok = true;
+                    }
+                    else
+                    {
+                        strcpy(reponse.texte, "Mot de passe incorrect…");
+                    }
+                }
+
+                reponse.type = m.expediteur;
+                reponse.requete = LOGIN;
+
+                if (ok)
+                {
+                    strcpy(reponse.data1, "OK");
+
+                    for (int i = 0; i < 6; i++)
+                    {
+                        if (tab->connexions[i].pidFenetre == m.expediteur)
+                        {
+                            strcpy(tab->connexions[i].nom, nom);
+                            break;
+                        }
+                    }
+                }
+                else
+                {
+                    strcpy(reponse.data1, "KO");
+                }
+
+                msgsnd(idQ, &reponse, sizeof(reponse)-sizeof(long), 0);
+                kill(m.expediteur, SIGUSR1);
+
+                if (!ok) break;
+
+                // prévenir les autres
+                for (int i = 0; i < 6; i++)
+                {
+                    if (tab->connexions[i].pidFenetre != 0 &&
+                        tab->connexions[i].pidFenetre != m.expediteur &&
+                        strlen(tab->connexions[i].nom) > 0)
+                    {
+                        MESSAGE r;
+                        r.type = tab->connexions[i].pidFenetre;
+                        r.requete = ADD_USER;
+                        strcpy(r.data1, nom);
+
+                        msgsnd(idQ, &r, sizeof(r)-sizeof(long), 0);
+                        kill(r.type, SIGUSR1);
+                    }
+                }
+
+                // envoyer la liste au nouveau
+                for (int i = 0; i < 6; i++)
+                {
+                    if (tab->connexions[i].pidFenetre != 0 &&
+                        tab->connexions[i].pidFenetre != m.expediteur &&
+                        strlen(tab->connexions[i].nom) > 0)
+                    {
+                        MESSAGE r;
+                        r.type = m.expediteur;
+                        r.requete = ADD_USER;
+                        strcpy(r.data1, tab->connexions[i].nom);
+
+                        msgsnd(idQ, &r, sizeof(r)-sizeof(long), 0);
+                        kill(m.expediteur, SIGUSR1);
+                    }
+                }
+
                 break;
             }
-        }
-    }
-    else
-    {
-        strcpy(reponse.data1, "KO");
-    }
-
-    msgsnd(idQ, &reponse, sizeof(reponse)-sizeof(long), 0);
-    kill(m.expediteur, SIGUSR1);
-
-    if (!ok) break;
-
-    // prévenir les autres
-    for (int i = 0; i < 6; i++)
-    {
-        if (tab->connexions[i].pidFenetre != 0 &&
-            tab->connexions[i].pidFenetre != m.expediteur &&
-            strlen(tab->connexions[i].nom) > 0)
-        {
-            MESSAGE r;
-            r.type = tab->connexions[i].pidFenetre;
-            r.requete = ADD_USER;
-            strcpy(r.data1, nom);
-
-            msgsnd(idQ, &r, sizeof(r)-sizeof(long), 0);
-            kill(r.type, SIGUSR1);
-        }
-    }
-
-    // envoyer la liste au nouveau
-    for (int i = 0; i < 6; i++)
-    {
-        if (tab->connexions[i].pidFenetre != 0 &&
-            tab->connexions[i].pidFenetre != m.expediteur &&
-            strlen(tab->connexions[i].nom) > 0)
-        {
-            MESSAGE r;
-            r.type = m.expediteur;
-            r.requete = ADD_USER;
-            strcpy(r.data1, tab->connexions[i].nom);
-
-            msgsnd(idQ, &r, sizeof(r)-sizeof(long), 0);
-            kill(m.expediteur, SIGUSR1);
-        }
-    }
-
-    break;
-}
 
 
 
@@ -538,131 +542,229 @@ case LOGIN:
                                                     kill(tab->connexions[i].pidFenetre, SIGUSR2);
                                             break;
 
-case CONSULT:
-{
-    fprintf(stderr,"(SERVEUR %d) Requete CONSULT reçue de %d pour %s\n",
-            getpid(), m.expediteur, m.data1);
+            case CONSULT:
+            {
+                fprintf(stderr,"(SERVEUR %d) Requete CONSULT reçue de %d pour %s\n",
+                        getpid(), m.expediteur, m.data1);
 
-    /* Création d’un processus Consultation dédié */
-    pid_t pid = fork();
-    if (pid == -1)
-    {
-        perror("(SERVEUR) fork CONSULT");
-        break;
-    }
-    if (pid == 0)
-    {
-        execl("./Consultation", "Consultation", NULL);
-        perror("execl Consultation");
-        exit(1);
-    }
+                /* Création d’un processus Consultation dédié */
+                pid_t pid = fork();
+                if (pid == -1)
+                {
+                    perror("(SERVEUR) fork CONSULT");
+                    break;
+                }
+                if (pid == 0)
+                {
+                    execl("./Consultation", "Consultation", NULL);
+                    perror("execl Consultation");
+                    exit(1);
+                }
 
-    /* Transfert de la requête au processus Consultation */
-    MESSAGE r = m;
-    r.type       = pid;            // destinataire = processus Consultation
-    r.expediteur = m.expediteur;   // PID du client
-    if (msgsnd(idQ, &r, sizeof(MESSAGE)-sizeof(long), 0) == -1)
-        perror("(SERVEUR) msgsnd CONSULT->Consultation");
+                /* Transfert de la requête au processus Consultation */
+                MESSAGE r = m;
+                r.type       = pid;            // destinataire = processus Consultation
+                r.expediteur = m.expediteur;   // PID du client
+                if (msgsnd(idQ, &r, sizeof(MESSAGE)-sizeof(long), 0) == -1)
+                    perror("(SERVEUR) msgsnd CONSULT->Consultation");
 
-    break;
-}             
+                break;
+            }             
 
 
-case MODIF1:
-{
-    fprintf(stderr,"(SERVEUR %d) Requete MODIF1 reçue de %d\n",
-            getpid(), m.expediteur);
+            case MODIF1:
+            {
+                fprintf(stderr,"(SERVEUR %d) Requete MODIF1 reçue de %d\n",
+                        getpid(), m.expediteur);
 
-    int idx = -1;
-    for (int i = 0; i < 6; i++)
-        if (tab->connexions[i].pidFenetre == m.expediteur)
-            idx = i;
+                int idx = -1;
+                for (int i = 0; i < 6; i++)
+                    if (tab->connexions[i].pidFenetre == m.expediteur)
+                        idx = i;
 
-    if (idx == -1)
-        break;
+                if (idx == -1)
+                    break;
 
-    // modification déjà en cours
-    if (tab->connexions[idx].pidModification != 0)
-    {
-        MESSAGE r;
-        r.type = m.expediteur;
-        r.requete = MODIF1;
-        strcpy(r.data1, "KO");
-        strcpy(r.data2, "KO");
-        strcpy(r.texte, "KO");
-        msgsnd(idQ, &r, sizeof(r)-sizeof(long), 0);
-        kill(m.expediteur, SIGUSR1);
-        break;
-    }
+                // modification déjà en cours
+                if (tab->connexions[idx].pidModification != 0)
+                {
+                    MESSAGE r;
+                    r.type = m.expediteur;
+                    r.requete = MODIF1;
+                    strcpy(r.data1, "KO");
+                    strcpy(r.data2, "KO");
+                    strcpy(r.texte, "KO");
+                    msgsnd(idQ, &r, sizeof(r)-sizeof(long), 0);
+                    kill(m.expediteur, SIGUSR1);
+                    break;
+                }
 
-    pid_t pid = fork();
-    if (pid == 0)
-    {
-        execl("./Modification", "Modification", NULL);
-        perror("execl Modification");
-        exit(1);
-    }
+                pid_t pid = fork();
+                if (pid == 0)
+                {
+                    execl("./Modification", "Modification", NULL);
+                    perror("execl Modification");
+                    exit(1);
+                }
 
-    tab->connexions[idx].pidModification = pid;
+                tab->connexions[idx].pidModification = pid;
 
-    MESSAGE r;
-    r.type       = pid;                     // type = PID du processus Modification
-    r.expediteur = m.expediteur;           // PID du client
-    r.requete    = MODIF1;
-    strcpy(r.data1, tab->connexions[idx].nom);
-    msgsnd(idQ, &r, sizeof(MESSAGE)-sizeof(long), 0);
+                MESSAGE r;
+                r.type       = pid;                     // type = PID du processus Modification
+                r.expediteur = m.expediteur;           // PID du client
+                r.requete    = MODIF1;
+                strcpy(r.data1, tab->connexions[idx].nom);
+                msgsnd(idQ, &r, sizeof(MESSAGE)-sizeof(long), 0);
 
-    break;
+                break;
+            }
+
+                      
+            case MODIF2:
+            {
+                fprintf(stderr,"(SERVEUR %d) Requete MODIF2 reçue de %d\n",
+                        getpid(), m.expediteur);
+
+                int idx = -1;
+                for (int i = 0; i < 6; i++)
+                    if (tab->connexions[i].pidFenetre == m.expediteur)
+                        idx = i;
+
+                if (idx == -1)               break;
+                if (tab->connexions[idx].pidModification == 0) break;
+
+                MESSAGE r = m;
+                r.type = tab->connexions[idx].pidModification;  // destinataire = Modification
+                msgsnd(idQ, &r, sizeof(MESSAGE)-sizeof(long), 0);
+
+                /* NE PAS remettre pidModification à 0 ici :
+                   il sera remis à 0 dans handlerSIGCHLD quand le fils se termine */
+
+                break;
+            }
+
+
+            case LOGIN_ADMIN:
+                        {
+                            fprintf(stderr,"(SERVEUR) LOGIN_ADMIN de %d\n", m.expediteur);
+                            
+                            bool adminOK = false;
+                            if (tab->pidAdmin == 0 || kill(tab->pidAdmin, 0) == -1)
+                            {
+                                tab->pidAdmin = m.expediteur;
+                                adminOK = true;
+                            }
+
+                            reponse.type = m.expediteur;
+                            reponse.requete = LOGIN_ADMIN;
+                            strcpy(reponse.data1, adminOK ? "OK" : "KO");
+                            strcpy(reponse.texte, adminOK ? "Admin connecté" : "Admin déjà connecté");
+                            msgsnd(idQ, &reponse, sizeof(reponse)-sizeof(long), 0);
+                            kill(m.expediteur, SIGUSR1);
+                            break;
+                        }
+
+                        case LOGOUT_ADMIN:
+                                                    {
+                                                        fprintf(stderr,"(SERVEUR) LOGOUT_ADMIN de %d\n", m.expediteur);
+                                                        if (tab->pidAdmin == m.expediteur)
+                                                            tab->pidAdmin = 0;
+                                                        break;
+                                                    }
+
+                                                    case NEW_USER:
+                                                    {
+                                                        fprintf(stderr,"(SERVEUR) NEW_USER %s / %s\n", m.data1, m.data2);
+                                                        
+                                                        char nom[20], mdp[20];
+                                                        strcpy(nom, m.data1);
+                                                        strcpy(mdp, m.data2);
+                                                        
+                                                        bool ok = false;
+                                                        int pos = estPresent(nom);
+                                                        if (pos == 0 || pos == -1)  // absent
+                                                        {
+                                                            ajouteUtilisateur(nom, mdp);
+                                                            
+                                                            char sql[256];
+                                                            sprintf(sql, "INSERT INTO UNIX_FINAL (nom, gsm, email) VALUES ('%s', '---', '---');", nom);
+                                                            if (mysql_query(connexion, sql) == 0)
+                                                                ok = true;
+                                                        }
+
+                                                        reponse.type = m.expediteur;
+                                                        reponse.requete = NEW_USER;
+                                                        strcpy(reponse.data1, ok ? "OK" : "KO");
+                                                        strcpy(reponse.texte, ok ? "Utilisateur ajouté" : "Utilisateur existe déjà");
+                                                        msgsnd(idQ, &reponse, sizeof(reponse)-sizeof(long), 0);
+                                                        kill(m.expediteur, SIGUSR1);
+                                                        break;
+                                                    }
+
+                        case DELETE_USER:
+                                                    {
+                                                        fprintf(stderr,"(SERVEUR) DELETE_USER %s\n", m.data1);
+                                                        
+                                                        char nom[20];
+                                                        strcpy(nom, m.data1);
+                                                        bool ok = false;
+
+                                                        /* Supprimer fichier */
+                                                        supprimeUtilisateur(nom);
+
+                                                        /* Supprimer BD */
+                                                        char sql[256];
+                                                        sprintf(sql, "DELETE FROM UNIX_FINAL WHERE nom='%s';", nom);
+                                                        if (mysql_query(connexion, sql) == 0)
+                                                            ok = true;
+
+                                                        reponse.type = m.expediteur;
+                                                        reponse.requete = DELETE_USER;
+                                                        strcpy(reponse.data1, ok ? "OK" : "KO");
+                                                        strcpy(reponse.texte, ok ? "Utilisateur supprimé" : "Utilisateur inexistant");
+                                                        msgsnd(idQ, &reponse, sizeof(reponse)-sizeof(long), 0);
+                                                        kill(m.expediteur, SIGUSR1);
+                                                        break;
+                                                    }
+
+                        case NEW_PUB:
+                                                    {
+                                                        fprintf(stderr,"(SERVEUR) NEW_PUB %s (%d sec)\n", m.texte, atoi(m.data1));
+                                                        
+                                                        int nbSec = atoi(m.data1);
+                                                        FILE *f = fopen("publicites.dat", "a");
+                                                        if (f)
+                                                        {
+                                                            PUBLICITE pub;
+                                                            strcpy(pub.texte, m.texte);
+                                                            pub.nbSecondes = nbSec;
+                                                            fwrite(&pub, sizeof(PUBLICITE), 1, f);
+                                                            fclose(f);
+
+                                                            /* Réveiller Publicite si fichier créé */
+                                                            if (tab->pidPublicite > 0)
+                                                                kill(tab->pidPublicite, SIGUSR1);
+                                                        }
+
+                                                        reponse.type = m.expediteur;
+                                                        reponse.requete = NEW_PUB;
+                                                        strcpy(reponse.data1, "OK");
+                                                        strcpy(reponse.texte, "Publicité ajoutée");
+                                                        msgsnd(idQ, &reponse, sizeof(reponse)-sizeof(long), 0);
+                                                        kill(m.expediteur, SIGUSR1);
+                                                        break;
+                                                    }
+
+                    }
+
+                    semop(idSem, &semTab_V, 1);  // libérer table
+                    afficheTab();
+                }
+
+    mysql_close(connexion);
+    return 0;
 }
 
-          
-case MODIF2:
-{
-    fprintf(stderr,"(SERVEUR %d) Requete MODIF2 reçue de %d\n",
-            getpid(), m.expediteur);
-
-    int idx = -1;
-    for (int i = 0; i < 6; i++)
-        if (tab->connexions[i].pidFenetre == m.expediteur)
-            idx = i;
-
-    if (idx == -1)               break;
-    if (tab->connexions[idx].pidModification == 0) break;
-
-    MESSAGE r = m;
-    r.type = tab->connexions[idx].pidModification;  // destinataire = Modification
-    msgsnd(idQ, &r, sizeof(MESSAGE)-sizeof(long), 0);
-
-    /* NE PAS remettre pidModification à 0 ici :
-       il sera remis à 0 dans handlerSIGCHLD quand le fils se termine */
-
-    break;
-}
-
-
-            case LOGIN_ADMIN :
-                                            fprintf(stderr,"(SERVEUR %d) Requete LOGIN_ADMIN reçue de %d\n",getpid(),m.expediteur);
-                                            break;
-
-            case LOGOUT_ADMIN :
-                                            fprintf(stderr,"(SERVEUR %d) Requete LOGOUT_ADMIN reçue de %d\n",getpid(),m.expediteur);
-                                            break;
-
-            case NEW_USER :
-                                            fprintf(stderr,"(SERVEUR %d) Requete NEW_USER reçue de %d : --%s--%s--\n",getpid(),m.expediteur,m.data1,m.data2);
-                                            break;
-
-            case DELETE_USER :
-                                            fprintf(stderr,"(SERVEUR %d) Requete DELETE_USER reçue de %d : --%s--\n",getpid(),m.expediteur,m.data1);
-                                            break;
-
-            case NEW_PUB :
-                                            fprintf(stderr,"(SERVEUR %d) Requete NEW_PUB reçue de %d\n",getpid(),m.expediteur);
-                                            break;
-        }
-        afficheTab();
-    }
-}
 
 void afficheTab()
 {

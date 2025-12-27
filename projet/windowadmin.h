@@ -4,9 +4,17 @@
 #include <QMainWindow>
 #include "protocole.h"
 
+
 QT_BEGIN_NAMESPACE
 namespace Ui { class WindowAdmin; }
 QT_END_NAMESPACE
+
+class WindowAdmin;
+
+extern WindowAdmin *wAdmin;
+
+
+void handlerSIGUSR1(int sig);
 
 class WindowAdmin : public QMainWindow
 {

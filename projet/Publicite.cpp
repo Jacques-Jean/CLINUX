@@ -8,6 +8,9 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include "protocole.h"
+#include <errno.h>
+
+
 
 int idQ, idShm;
 char* pShm;
@@ -21,7 +24,11 @@ void handlerSIGTERM(int sig)
     fprintf(stderr, "(CLIENT) Mémoire détachée, fin du client\n");
     exit(0);
 }
-
+void handlerSIGUSR1(int sig)
+{
+    (void)sig;
+    fprintf(stderr,"(PUBLICITE %d) SIGUSR1 reçu → réveil\n", getpid());
+}
 
 
 int main()
@@ -46,20 +53,34 @@ int main()
     while (!stop)
     {
         PUBLICITE pub;
-        if (read(fd, &pub, sizeof(pub)) != sizeof(pub))
+        ssize_t n = read(fd, &pub, sizeof(pub));
+        
+        if (n == -1)
+        {
+            if (errno == ENOENT)
+            {
+                fprintf(stderr,"(PUBLICITE) publicites.dat absent → attente\n");
+                sleep(5);
+                continue;
+            }
+            perror("read pub");
+            sleep(1);
+            continue;
+        }
+        
+        if (n != sizeof(pub))
         {
             lseek(fd, 0, SEEK_SET);
             continue;
         }
 
         strncpy(pShm, pub.texte, 199);
-        pShm[199] = 0;
+        pShm[199] = '\0';
 
         MESSAGE m;
         m.type = 1;
         m.expediteur = getpid();
         m.requete = UPDATE_PUB;
-
         msgsnd(idQ, &m, sizeof(m)-sizeof(long), 0);
         fprintf(stderr,"(PUBLICITE) UPDATE_PUB envoyé\n");
 

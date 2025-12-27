@@ -40,6 +40,7 @@ int listeUtilisateurs(UTILISATEUR *vecteur);
 
 void updateMotDePasse(const char* nom, const char* motDePasse);
 
+void supprimeUtilisateur(const char* nom);
 
 
 #endif

@@ -39,47 +39,32 @@ MYSQL* connexion;
 void handlerSIGINT(int sig)
 {
     (void)sig;
-
     fprintf(stderr, "\n(SERVEUR %d) Arret du serveur...\n", getpid());
 
-    /* Prendre sémaphore table pour nettoyer proprement */
     semop(idSem, &semTab_P, 1);
 
-    /* Nettoyer pidPublicite si c'est moi qui l'ai créé */
-    if (tab->pidPublicite == getpid())
+    if (tab->pidPublicite > 0)
     {
         kill(tab->pidPublicite, SIGTERM);
         waitpid(tab->pidPublicite, NULL, 0);
         tab->pidPublicite = 0;
     }
 
-    /* Nettoyer mon pidServeur */
-    if (tab->pidServeur1 == getpid())
-        tab->pidServeur1 = 0;
-    else if (tab->pidServeur2 == getpid())
-        tab->pidServeur2 = 0;
-
-    /* Nettoyer pidAdmin si mort */
-    if (tab->pidAdmin > 0 && kill(tab->pidAdmin, 0) == -1)
-        tab->pidAdmin = 0;
+    tab->pidServeur1 = 0;
+    tab->pidAdmin   = 0;
 
     semop(idSem, &semTab_V, 1);
 
-    /* Détacher mémoire */
     shmdt(tab);
 
-    /* SUPPRIMER IPC UNIQUEMENT si dernier serveur actif */
-    if (tab->pidServeur1 == 0 && tab->pidServeur2 == 0)
-    {
-        fprintf(stderr, "(SERVEUR) Dernier serveur actif → suppression IPC\n");
-        shmctl(idShm, IPC_RMID, NULL);
-        msgctl(idQ, IPC_RMID, NULL);
-        semctl(idSem, 0, IPC_RMID);  // supprime TOUS les sémaphores
-    }
+    shmctl(idShm, IPC_RMID, NULL);
+    msgctl(idQ, IPC_RMID, NULL);
+    semctl(idSem, 0, IPC_RMID);
 
-    fprintf(stderr,"(SERVEUR %d) Arret complet\n", getpid());
+    fprintf(stderr,"(SERVEUR) Arret complet\n");
     exit(0);
 }
+
 void handlerSIGCHLD(int sig)
 {
     (void)sig;
@@ -122,57 +107,31 @@ int main()
     A.sa_flags = SA_RESTART;
     sigaction(SIGCHLD, &A, NULL);
 
-     /* ========================================== */
-    /* NOUVEAU : DOUBLE SERVEUR CORRECT          */
-    /* ========================================== */
-    pid_t monPid = getpid();
-    
-    /* Test si 1er serveur */
-    idShm = shmget(CLE, sizeof(TAB_CONNEXIONS), IPC_CREAT | IPC_EXCL | 0600);
-    bool premierServeur = (idShm != -1);
+    idQ   = msgget(CLE, IPC_CREAT | 0600);
+    idShm = shmget(CLE, sizeof(TAB_CONNEXIONS), IPC_CREAT | 0600);
+    idSem = semget(CLE, 2, IPC_CREAT | 0600);
 
-    if (premierServeur)
-    {
-        fprintf(stderr,"(SERVEUR %d) PREMIER : création IPC\n", monPid);
-        idQ = msgget(CLE, IPC_CREAT | 0600);
-        idSem = semget(CLE, 2, IPC_CREAT | 0600);  // 2 SÉMAPHORES
-        
-        arg.val = 1; semctl(idSem, 0, SETVAL, arg);  // BD
-        arg.val = 1; semctl(idSem, 1, SETVAL, arg);  // Table   
-    }
-    else
-    {
-        fprintf(stderr,"(SERVEUR %d) SECOND : connexion IPC\n", monPid);
-        idShm = shmget(CLE, sizeof(TAB_CONNEXIONS), 0);
-        idQ = msgget(CLE, 0);
-        idSem = semget(CLE, 2, 0);
-    }
+    arg.val = 1; semctl(idSem, 0, SETVAL, arg); // BD
+    arg.val = 1; semctl(idSem, 1, SETVAL, arg); // Table
+
+
 
     tab = (TAB_CONNEXIONS*)shmat(idShm, NULL, 0);
-    
-    /* Protéger init table */
+
     semop(idSem, &semTab_P, 1);
-    
-    if (premierServeur)
+    memset(tab, 0, sizeof(TAB_CONNEXIONS));
+    tab->pidServeur1 = getpid();
+
+    /* Lancer Publicité */
+    pid_t pidPub = fork();
+    if (pidPub == 0)
     {
-        memset(tab, 0, sizeof(TAB_CONNEXIONS));
-        tab->pidServeur1 = monPid;
-        pid_t pidPub = fork();
-        if (pidPub == 0) { execl("./Publicite", "Publicite", NULL); exit(1); }
-        tab->pidPublicite = pidPub;
+        execl("./Publicite", "Publicite", NULL);
+        exit(1);
     }
-    else
-    {
-        /* Vérifier place */
-        bool placeOK = false;
-        if (tab->pidServeur1 == 0 || kill(tab->pidServeur1, 0) == -1)
-            { tab->pidServeur1 = monPid; placeOK = true; }
-        else if (tab->pidServeur2 == 0 || kill(tab->pidServeur2, 0) == -1)
-            { tab->pidServeur2 = monPid; placeOK = true; }
-        if (!placeOK) { semop(idSem, &semTab_V, 1); shmdt(tab); exit(1); }
-    }
-    
+    tab->pidPublicite = pidPub;
     semop(idSem, &semTab_V, 1);
+
     afficheTab();
 
 
@@ -769,7 +728,6 @@ int main()
 void afficheTab()
 {
     fprintf(stderr,"Pid Serveur 1 : %d\n",tab->pidServeur1);
-    fprintf(stderr,"Pid Serveur 2 : %d\n",tab->pidServeur2);
     fprintf(stderr,"Pid Publicite : %d\n",tab->pidPublicite);
     fprintf(stderr,"Pid Admin         : %d\n",tab->pidAdmin);
     for (int i=0 ; i<6 ; i++)
